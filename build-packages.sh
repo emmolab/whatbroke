@@ -2,6 +2,11 @@
 
 set -e
 
+#Cleanup Old Build
+rm -rf ./dist
+rm -rf ./__pycache__
+rm -rf ./checks/__pycache__
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,7 +22,7 @@ BUILD_DIR="$PROJECT_DIR/build"
 DIST_DIR="$PROJECT_DIR/dist"
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE} whatbroke v${VERSION} Package Builder${NC}"
+echo -e "${BLUE} 🔧 whatbroke v${VERSION} Package Builder${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 

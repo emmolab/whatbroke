@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 
@@ -10,11 +11,15 @@ if parent_dir not in sys.path:
 from result import Result
 
 def check():
-    proc = subprocess.run(
-        ["systemctl", "--failed", "--no-legend"],
-        capture_output=True,
-        text=True
-    )
+    if shutil.which('systemctl'):
+        proc = subprocess.run(
+            ["systemctl", "--failed", "--no-legend"],
+            capture_output=True,
+            text=True
+        )
+    else:
+        proc = subprocess.run(["echo"], capture_output=True, text=True)
+        proc.returncode = 1
 
     output = proc.stdout.strip()
     if not output:

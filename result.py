@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-VALID_STATUSES = {"OK", "WARN", "BROKE"}
+VALID_STATUSES = {"OK", "WARN", "BROKE", "CRIT"}
 
 @dataclass
 class Result:
