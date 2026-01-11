@@ -1,229 +1,240 @@
 import os
 import subprocess
-import sys
 
-# Add parent directory to path for local development
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+from whatbroke.result import Result
 
-from result import Result
 
-def _check_cron_jobs():
-    """Check cron job execution status"""
-    cron_issues = []
-    
-    try:
-        # Check if any cron service is running
-        cron_services = ["cron", "crond", "anacron"]
-        cron_active = False
-        
-        for service in cron_services:
-            proc = subprocess.run(
-                ["systemctl", "is-active", service],
-                capture_output=True,
-                text=True
-            )
-            if "active" in proc.stdout:
-                cron_active = True
-                break
-        
-        if not cron_active:
-            cron_issues.append("Cron service: Not running")
-            return cron_issues
-        
-        # Check for cron execution errors in logs
-        log_files = ["/var/log/cron.log", "/var/log/cron", "/var/log/crond", "/var/log/syslog"]
-        
-        error_count = 0
-        for log_file in log_files:
-            if os.path.exists(log_file):
-                # Get last 100 lines looking for execution errors
-                proc = subprocess.run(
-                    ["grep", "-i", "error\\|failed\\|permission denied", log_file, "|", "tail", "-n", "20"],
-                    capture_output=True,
-                    text=True,
-                    shell=True
-                )
-                
-                if proc.returncode == 0 and proc.stdout.strip():
-                    error_count += len(proc.stdout.strip().splitlines())
-                    cron_issues.extend([f"Cron error: {line.strip()[:100]}" for line in proc.stdout.strip().splitlines()[:3]])
-        
-        if error_count > 0:
-            cron_issues.insert(0, f"Cron execution errors: {error_count} found")
-    
-    except Exception:
-        cron_issues.append("Cron check: Unable to verify status")
-    
-    return cron_issues
+def _run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+# ---------------------------
+# Cron
+# ---------------------------
+
+def _cron_service_running():
+    for svc in ("cron", "crond"):
+        r = _run(["systemctl", "is-active", svc])
+        if r.returncode == 0 and "active" in r.stdout:
+            return True
+    return False
+
+
+def _check_crontabs():
+    issues = []
+
+    if not os.path.exists("/etc/passwd"):
+        return issues
+
+    with open("/etc/passwd") as f:
+        users = []
+        for l in f:
+            parts = l.split(":")
+            if len(parts) >= 3:
+                user = parts[0]
+                uid = parts[2]
+                # Skip system users (UID < 1000 or UID >= 65534) and users with no shell or invalid shells
+                try:
+                    uid_int = int(uid)
+                    if uid_int >= 1000 and uid_int < 65534 and len(parts) > 6:
+                        shell = parts[6]
+                        # Skip users with nologin, false, sync, or system shells
+                        if shell not in ["/sbin/nologin", "/bin/false", "/usr/sbin/nologin", "/bin/sync", "/usr/bin/sync"]:
+                            users.append(user)
+                except ValueError:
+                    continue
+
+    for user in users:
+        r = _run(["crontab", "-l", "-u", user])
+
+        # Explicitly skip users with no crontab
+        if "no crontab for" in r.stderr.lower():
+            continue
+
+        if r.returncode != 0:
+            issues.append(f"{user}: crontab unreadable")
+            continue
+
+        for line in r.stdout.splitlines():
+            l = line.strip()
+            if not l or l.startswith("#"):
+                continue
+
+            # Basic structural validation
+            parts = l.split()
+            if len(parts) < 6:
+                issues.append(f"{user}: malformed entry: '{l}'")
+                continue
+
+            # Validate time fields (should be 5 time fields)
+            time_fields = parts[:5]
+            for i, field in enumerate(time_fields):
+                if field == "*":
+                    continue
+                # Check for valid cron patterns
+                if i < 4:  # minute, hour, day of month, month
+                    try:
+                        if "/" in field:
+                            base, step = field.split("/")
+                            if base != "*" and not base.isdigit():
+                                issues.append(f"{user}: invalid time field '{field}' in '{l}'")
+                                break
+                        elif "," in field:
+                            for val in field.split(","):
+                                if val != "*" and not val.isdigit():
+                                    issues.append(f"{user}: invalid time field '{field}' in '{l}'")
+                                    break
+                        elif "-" in field:
+                            start, end = field.split("-")
+                            if not start.isdigit() or not end.isdigit():
+                                issues.append(f"{user}: invalid time field '{field}' in '{l}'")
+                                break
+                        elif field != "*" and not field.isdigit():
+                            issues.append(f"{user}: invalid time field '{field}' in '{l}'")
+                            break
+                    except:
+                        issues.append(f"{user}: invalid time field '{field}' in '{l}'")
+                        break
+
+    return issues
+
+
+# ---------------------------
+# systemd timers
+# ---------------------------
 
 def _check_systemd_timers():
-    """Check systemd timer status"""
-    timer_issues = []
-    
-    try:
-        # List all timers
-        proc = subprocess.run(
-            ["systemctl", "list-timers", "--all", "--no-pager"],
-            capture_output=True,
-            text=True
-        )
-        
-        if proc.returncode == 0:
-            lines = proc.stdout.strip().splitlines()
-            
-            for line in lines[1:]:  # Skip header
-                if not line.strip():
-                    continue
-                
-                parts = line.split()
-                if len(parts) >= 7:
-                    timer_name = parts[0]
-                    next_run = parts[2]
-                    last_run = parts[3]
-                    unit = parts[6]
-                    
-                    # Check for failed timers
-                    if "failed" in last_run.lower() or "failed" in next_run.lower():
-                        timer_issues.append(f"Timer {timer_name}: Failed")
-                    # Check for inactive timers that should be running
-                    elif "inactive" in unit.lower() and not timer_name.startswith("systemd-"):
-                        timer_issues.append(f"Timer {timer_name}: Inactive")
-    
-    except Exception:
-        timer_issues.append("Systemd timers: Unable to check status")
-    
-    return timer_issues
+    issues = []
 
-def _check_cron_syntax():
-    """Check cron files for syntax errors"""
-    cron_syntax_issues = []
-    
-    try:
-        # Check /etc/crontab only if it exists and has content
-        if os.path.exists("/etc/crontab"):
-            with open("/etc/crontab", 'r') as f:
-                content = f.read().strip()
-            
-            if content:  # Only check if not empty
-                proc = subprocess.run(
-                    ["bash", "-c", "cat /etc/crontab 2>/dev/null | crontab -l - 2>&1 1>/dev/null || echo 'Syntax error detected'"],
-                    capture_output=True,
-                    text=True
-                )
-                
-                if proc.returncode != 0 or "syntax error" in proc.stdout.lower():
-                    cron_syntax_issues.append("/etc/crontab: Syntax error")
-        
-        # Check user crontabs only for non-empty files
-        cron_dir = "/var/spool/cron/crontabs"
-        if os.path.exists(cron_dir):
-            proc = subprocess.run(
-                ["find", cron_dir, "-type", "f", "-size", "+0c"],
-                capture_output=True,
-                text=True
-            )
-            
-            if proc.returncode == 0:
-                users = proc.stdout.strip().splitlines()
-                for user in users:
-                    user_cron = os.path.join(cron_dir, user)
-                    with open(user_cron, 'r') as f:
-                        content = f.read().strip()
-                    
-                    if content:  # Only check if not empty
-                        proc = subprocess.run(
-                            ["bash", "-c", f"cat '{user_cron}' 2>/dev/null | crontab -l - 2>&1 1>/dev/null || echo 'Syntax error detected'"],
-                            capture_output=True,
-                            text=True
-                        )
-                        
-                        if proc.returncode != 0 or "syntax error" in proc.stdout.lower():
-                            cron_syntax_issues.append(f"User cron ({user}): Syntax error")
-        
-        # Check /etc/cron.d for syntax errors
-        cron_d_dir = "/etc/cron.d"
-        if os.path.exists(cron_d_dir):
-            proc = subprocess.run(
-                ["find", cron_d_dir, "-type", "f", "-size", "+0c"],
-                capture_output=True,
-                text=True
-            )
-            
-            if proc.returncode == 0:
-                cron_files = proc.stdout.strip().splitlines()
-                for cron_file in cron_files:
-                    proc = subprocess.run(
-                        ["bash", "-c", f"cat '{cron_file}' 2>/dev/null | crontab -l - 2>&1 1>/dev/null || echo 'Syntax error detected'"],
-                        capture_output=True,
-                        text=True
-                    )
-                    
-                    if proc.returncode != 0 or "syntax error" in proc.stdout.lower():
-                        cron_syntax_issues.append(f"Cron file ({os.path.basename(cron_file)}): Syntax error")
-    
-    except Exception:
-        cron_syntax_issues.append("Cron syntax check: Unable to verify")
-    
-    return cron_syntax_issues
+    # Failed timers (authoritative)
+    r = _run(["systemctl", "list-timers", "--failed", "--no-pager"])
+    if r.returncode == 0:
+        for line in r.stdout.splitlines():
+            if ".timer" in line:
+                issues.append(f"timer failed: {line.split()[0]}")
+
+    # Inactive timers (non-system)
+    r = _run(["systemctl", "list-timers", "--all", "--no-pager"])
+    if r.returncode == 0:
+        for line in r.stdout.splitlines():
+            if ".timer" not in line:
+                continue
+            if "inactive" in line.lower() and not line.startswith("systemd-"):
+                issues.append(f"timer inactive: {line.split()[0]}")
+
+    return issues
+
+
+# ---------------------------
+# Entry
+# ---------------------------
 
 def check():
-    """Comprehensive scheduled tasks check"""
     details = []
-    worst_status = "OK"
+    status = "OK"
     remediation = None
-    
-    # Cron job check
-    cron_issues = _check_cron_jobs()
-    if cron_issues:
-        details.extend(cron_issues[:5])  # Limit to first 5
-        if "Not running" in str(cron_issues):
-            worst_status = "CRIT"
-        elif worst_status == "OK":
-            worst_status = "WARN"
-        remediation = "Check cron service: systemctl status cron && journalctl -u cron"
-    else:
-        details.append("Cron service: OK")
-    
-    # Systemd timers check
+
+    cron_running = _cron_service_running()
+    cron_issues = _check_crontabs()
+
     timer_issues = _check_systemd_timers()
+
+    if not cron_running:
+        status = "CRIT"
+        details.append("cron service not running")
+        remediation = "enable cron service"
+    elif cron_issues:
+        status = "WARN"
+        details.extend(cron_issues)
+        remediation = "review user crontabs"
+
     if timer_issues:
-        details.extend(timer_issues[:5])  # Limit to first 5
-        if "Failed" in str(timer_issues):
-            worst_status = "CRIT"
-        elif worst_status == "OK":
-            worst_status = "WARN"
+        if status != "CRIT":
+            status = "CRIT"
+        details.extend(timer_issues)
         if not remediation:
-            remediation = "Check systemd timers: systemctl list-timers && systemctl status <timer>"
-    else:
-        details.append("Systemd timers: OK")
-    
-    # Cron syntax check
-    cron_syntax_issues = _check_cron_syntax()
-    if cron_syntax_issues:
-        details.extend(cron_syntax_issues[:5])  # Limit to first 5
-        worst_status = "CRIT"
-        if not remediation:
-            remediation = "Fix cron syntax: crontab -e, check /etc/crontab, test with crontab -l"
-    else:
-        details.append("Cron syntax: OK")
-    
-    # Main message
-    message_parts = []
-    message_parts.append(f"Cron issues: {len(cron_issues)}")
-    message_parts.append(f"Timer issues: {len(timer_issues)}")
-    message_parts.append(f"Syntax errors: {len(cron_syntax_issues)}")
-    
-    main_message = ", ".join(message_parts)
-    
-    if worst_status == "OK":
-        main_message = "All scheduled tasks healthy"
-    
+            remediation = "check systemd timers"
+
+    if status == "OK":
+        # Provide more detailed info for OK status
+        details = []
+        
+        # Add cron service status
+        if cron_running:
+            details.append("Cron service: Active and running")
+        else:
+            details.append("Cron service: Not running")
+        
+        # Count valid users that could have crontabs
+        with open("/etc/passwd") as f:
+            users = []
+            for l in f:
+                parts = l.split(":")
+                if len(parts) >= 3:
+                    user = parts[0]
+                    uid = parts[2]
+                    try:
+                        uid_int = int(uid)
+                        if uid_int >= 1000 and uid_int < 65534 and len(parts) > 6:
+                            shell = parts[6]
+                            if shell not in ["/sbin/nologin", "/bin/false", "/usr/sbin/nologin", "/bin/sync", "/usr/bin/sync"]:
+                                users.append(user)
+                    except ValueError:
+                        continue
+        
+        # Check if any users actually have crontabs
+        crontab_users = []
+        for user in users:
+            r = _run(["crontab", "-l", "-u", user])
+            if "no crontab for" not in r.stderr.lower() and r.returncode == 0:
+                crontab_users.append(user)
+        
+        # Add user crontab information
+        if crontab_users:
+            details.append(f"User crontabs found: {', '.join(crontab_users)}")
+        else:
+            details.append("User crontabs: No user crontabs found")
+        
+        # Check systemd timers
+        r = _run(["systemctl", "list-timers", "--no-pager"])
+        timer_count = 0
+        if r.returncode == 0:
+            timer_count = len([l for l in r.stdout.splitlines() if ".timer" in l and not l.startswith("NEXT")])
+        
+        # Add timer information
+        if timer_count > 0:
+            details.append(f"Systemd timers: {timer_count} active timers found")
+        else:
+            details.append("Systemd timers: No active timers found")
+        
+        # Build status message
+        status_msg_parts = []
+        if cron_running:
+            status_msg_parts.append("Cron service running")
+        else:
+            status_msg_parts.append("Cron service not running")
+        
+        if crontab_users:
+            status_msg_parts.append(f"{len(crontab_users)} user crontabs")
+        else:
+            status_msg_parts.append("no user crontabs")
+        
+        if timer_count > 0:
+            status_msg_parts.append(f"{timer_count} systemd timers")
+        else:
+            status_msg_parts.append("no systemd timers")
+        
+        return Result(
+            name="scheduled", 
+            status="OK", 
+            message=", ".join(status_msg_parts),
+            details=details
+        )
+
     return Result(
         name="scheduled",
-        status=worst_status,
-        message=main_message,
-        details=details,
-        remediation=remediation
+        status=status,
+        message="issues",
+        details=details[:10],
+        remediation=remediation,
     )

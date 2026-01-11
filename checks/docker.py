@@ -24,42 +24,101 @@ def _check_docker_status():
         return False, "Docker not installed or timeout"
 
 def _get_exited_containers():
-    """Get list of exited containers"""
+    """Get list of exited containers with detailed information"""
     try:
         proc = subprocess.run(
-            ["docker", "ps", "-a", "--filter", "status=exited", "--format", "{{.ID}} {{.Names}} {{.Status}}"],
+            ["docker", "ps", "-a", "--filter", "status=exited", 
+             "--format", "{{.ID}} {{.Names}} {{.Status}} {{.Image}}"],
             capture_output=True,
             text=True
         )
         
         if proc.returncode == 0:
             containers = []
-            for line in proc.stdout.strip().splitlines():
+            lines = proc.stdout.strip().splitlines()
+            # Skip header line if present
+            start_idx = 1 if lines and 'CONTAINER ID' in lines[0] else 0
+            for line in lines[start_idx:]:
                 if line.strip():
-                    parts = line.split(' ', 2)
-                    if len(parts) >= 3:
-                        containers.append(f"{parts[1]} ({parts[0]}): {parts[2]}")
+                    # Split by spaces but keep the status (which may contain spaces) together
+                    # Format: ID Name Status Image
+                    # Status may have multiple words like "Exited (0) 5 minutes ago"
+                    words = line.split()
+                    if len(words) >= 4:
+                        container_id = words[0][:12]
+                        name = words[1]
+                        # Status is everything between name and image
+                        # Find where image starts (usually the last word)
+                        # But we need to be smarter about it
+                        # For now, assume status is words[2:-1] and image is words[-1]
+                        if len(words) > 4:
+                            status = ' '.join(words[2:-1])
+                            image = words[-1]
+                        else:
+                            status = words[2]
+                            image = words[3] if len(words) > 3 else "unknown"
+                        
+                        # Get exit code
+                        try:
+                            inspect_proc = subprocess.run(
+                                ["docker", "inspect", container_id, "--format", "{{.State.ExitCode}}"],
+                                capture_output=True,
+                                text=True,
+                                timeout=2
+                            )
+                            exit_code = inspect_proc.stdout.strip()
+                            if exit_code and exit_code not in status:
+                                status += f" (exit code: {exit_code})"
+                        except:
+                            pass
+                        
+                        containers.append(f"{name} ({container_id}): {status} [image: {image}]")
             return containers
         return []
     except Exception:
         return []
 
 def _get_restarting_containers():
-    """Get containers that are frequently restarting"""
+    """Get containers that are frequently restarting with details"""
     try:
         proc = subprocess.run(
-            ["docker", "ps", "--format", "{{.ID}} {{.Names}} {{.Status}}"],
+            ["docker", "ps", "--format", "{{.ID}} {{.Names}} {{.Status}} {{.Image}}"],
             capture_output=True,
             text=True
         )
         
         restarting_containers = []
         if proc.returncode == 0:
-            for line in proc.stdout.strip().splitlines():
+            lines = proc.stdout.strip().splitlines()
+            for line in lines:
                 if line.strip() and "restarting" in line.lower():
-                    parts = line.split(' ', 2)
-                    if len(parts) >= 3:
-                        restarting_containers.append(f"{parts[1]} ({parts[0]}): {parts[2]}")
+                    words = line.split()
+                    if len(words) >= 4:
+                        container_id = words[0][:12]
+                        name = words[1]
+                        # Status is everything between name and image
+                        if len(words) > 4:
+                            status = ' '.join(words[2:-1])
+                            image = words[-1]
+                        else:
+                            status = words[2]
+                            image = words[3] if len(words) > 3 else "unknown"
+                        
+                        # Get restart count
+                        try:
+                            inspect_proc = subprocess.run(
+                                ["docker", "inspect", container_id, "--format", "{{.RestartCount}}"],
+                                capture_output=True,
+                                text=True,
+                                timeout=2
+                            )
+                            restart_count = inspect_proc.stdout.strip()
+                            if restart_count and restart_count != "0":
+                                status += f" (restarts: {restart_count})"
+                        except:
+                            pass
+                        
+                        restarting_containers.append(f"{name} ({container_id}): {status} [image: {image}]")
         
         return restarting_containers
     except Exception:
@@ -190,21 +249,29 @@ def check():
         # Check exited containers
         exited_containers = _get_exited_containers()
         if exited_containers:
-            details.extend([f"Exited container: {container}" for container in exited_containers[:10]])
+            details.append(f"Docker: Found {len(exited_containers)} exited container(s)")
+            for container in exited_containers[:5]:  # Show first 5 in detail
+                details.append(f"  → {container}")
+            if len(exited_containers) > 5:
+                details.append(f"  → ... and {len(exited_containers) - 5} more")
             if worst_status == "OK":
                 worst_status = "WARN"
             remediation = "Clean up exited containers: docker rm <container> || docker system prune"
         else:
-            details.append("Docker containers: All healthy")
+            details.append("Docker: All running containers healthy")
         
         # Check restarting containers
         restarting_containers = _get_restarting_containers()
         if restarting_containers:
-            details.extend([f"Restarting container: {container}" for container in restarting_containers[:5]])
+            details.append(f"Docker: Found {len(restarting_containers)} restarting container(s)")
+            for container in restarting_containers[:3]:  # Show first 3 in detail
+                details.append(f"  → {container}")
+            if len(restarting_containers) > 3:
+                details.append(f"  → ... and {len(restarting_containers) - 3} more")
             if worst_status == "OK":
                 worst_status = "WARN"
             if not remediation:
-                remediation = "Check restarting containers: docker logs <container>"
+                remediation = "Check restarting containers: docker logs <container> || docker inspect <container>"
     
     # Kubernetes check
     k8s_issues = _check_kubernetes_status()
