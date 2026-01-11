@@ -17,7 +17,7 @@
 
 ```
 
-🧠 **Enterprise-grade Linux system diagnostics tool** that performs comprehensive health checks across 8 critical system categories with intelligent monitoring, detailed reporting, and actionable remediation steps.
+ **Linux system diagnostics tool** that performs health checks across 8 critical system categories with monitoring, reporting, and remediation steps.
 
 ---
 
@@ -62,7 +62,7 @@ sudo ./dist/uninstall.sh
 
 ---
 
-## 🎨 Output Formats & Options
+##  Output Formats & Options
 
 ### 🎯 **Basic Usage**
 ```bash
@@ -73,7 +73,7 @@ whatbroke
 whatbroke --only disk,hardware,security
 
 # Skip noisy checks
-whatbroke --skip docker,containers
+whatbroke --skip docker,security
 ```
 
 ### 🔍 **Detailed Monitoring**
@@ -108,7 +108,7 @@ whatbroke --compact --only critical
 
 ---
 
-## 🌟 Enhanced Output Examples
+##  Verbose Output Examples
 
 ### 🐳 **Container Diagnostics**
 ```
@@ -153,7 +153,7 @@ hardware: OK - Load: 1.56 (8 CPUs), Memory: 58.0% available, Max temp: 43.0°C
 
 ---
 
-## 🎯 Status Indicators
+##  Status Indicators
 
 | Status | Color | Meaning | Action Required |
 |--------|-------|---------|----------------|
@@ -310,4 +310,4 @@ Built with ❤️ for Linux system administrators, DevOps engineers, and SRE tea
 
 ---
 
-**🎯 whatbroke - Your Linux system's best friend for health monitoring and issue detection**
+**whatbroke**
