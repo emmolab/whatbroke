@@ -1,482 +1,337 @@
 #!/bin/bash
+# whatbroke — package builder
+# Produces: dist/whatbroke-<ver>-py3-none-any.whl
+#           dist/whatbroke_<ver>_all.deb   (if dpkg-deb available)
+#           dist/whatbroke-<ver>-1.noarch.rpm  (if rpmbuild available)
 
-set -e
+set -euo pipefail
 
-#Cleanup Old Build
-rm -rf ./dist
-rm -rf ./__pycache__
-rm -rf ./checks/__pycache__
+# ─── colours ───────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}✓${NC} $*"; }
+warn() { echo -e "${YELLOW}!${NC} $*"; }
+err()  { echo -e "${RED}✗${NC} $*" >&2; }
+step() { echo -e "\n${BLUE}▶${NC} $*"; }
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Get version from pyproject.toml
-VERSION=$(grep "version = " pyproject.toml | cut -d'"' -f2)
+# ─── paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$SCRIPT_DIR"
-BUILD_DIR="$PROJECT_DIR/build"
-DIST_DIR="$PROJECT_DIR/dist"
+PKG_SRC="$SCRIPT_DIR/whatbroke"
+DIST_DIR="$SCRIPT_DIR/dist"
+BUILD_DIR="$SCRIPT_DIR/.build-tmp"
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE} 🔧 whatbroke v${VERSION} Package Builder${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
-
-# Clean previous builds
-echo -e "${YELLOW}Cleaning previous builds...${NC}"
-rm -rf "$BUILD_DIR" "$DIST_DIR" *.egg-info
-find . -name "*.pyc" -delete
-find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-mkdir -p "$BUILD_DIR" "$DIST_DIR"
-
-# Step 1: Build Python packages first
-echo -e "${YELLOW}Step 1: Building Python packages...${NC}"
-cd "$PROJECT_DIR"
-
-# Create setup.py for building
-cat > setup.py << 'EOF'
-#!/usr/bin/env python3
-
-import os
-import sys
-from setuptools import setup, find_packages
-
-# Read version from pyproject.toml
-version = "0.1.0"
-try:
-    with open("pyproject.toml") as f:
-        for line in f:
-            if line.strip().startswith("version = "):
-                version = line.split('"')[1]
-                break
-except:
-    pass
-
-# Read long description from README
-long_description = ""
-try:
-    with open("README.md") as f:
-        long_description = f.read()
-except:
-    pass
-
-setup(
-    name="whatbroke",
-    version=version,
-    description="Linux system diagnostics tool",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    author="Emerson",
-    author_email="emerson@example.com",
-    url="https://github.com/emerson/whatbroke",
-    license="MIT",
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Environment :: Console",
-        "Intended Audience :: System Administrators",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: POSIX :: Linux",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-        "Programming Language :: Python :: 3.13",
-        "Topic :: System :: Monitoring",
-        "Topic :: System :: Systems Administration",
-    ],
-    python_requires=">=3.8",
-    packages=find_packages(),
-    py_modules=["cli", "result"],
-    entry_points={
-        "console_scripts": [
-            "whatbroke=cli:main",
-        ],
-    },
-    include_package_data=True,
-    zip_safe=False,
-)
-EOF
-
-# Skip Python wheel build if setuptools not available, focus on native packages
-if python3 -c "import setuptools" 2>/dev/null; then
-    python3 setup.py bdist_wheel
-    echo -e "${GREEN}✓ Python wheel package created${NC}"
+# ─── version ───────────────────────────────────────────────────────────────────
+# Parse from pyproject.toml without spawning Python (grep fallback)
+if python3 -c "import tomllib" 2>/dev/null; then
+    VERSION=$(python3 -c "
+import tomllib
+with open('$SCRIPT_DIR/pyproject.toml', 'rb') as f:
+    print(tomllib.load(f)['project']['version'])
+")
+elif python3 -c "import tomli" 2>/dev/null; then
+    VERSION=$(python3 -c "
+import tomli
+with open('$SCRIPT_DIR/pyproject.toml', 'rb') as f:
+    print(tomli.load(f)['project']['version'])
+")
 else
-    echo -e "${YELLOW}Python build tools not available, focusing on native packages...${NC}"
+    # Pure grep fallback (no external deps needed)
+    VERSION=$(grep '^version' "$SCRIPT_DIR/pyproject.toml" | head -1 | cut -d'"' -f2)
 fi
 
-# Step 2: Create source tarball for native packages
-echo -e "${YELLOW}Step 2: Creating source tarball for native packages...${NC}"
-cd "$PROJECT_DIR"
-tar -czf "$DIST_DIR/whatbroke-$VERSION.tar.gz" \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='dist' \
-    --exclude='build' \
-    --exclude='.git' \
-    --exclude='venv' \
-    --exclude='.venv' \
-    --exclude='packaging' \
-    *.py pyproject.toml *.md *.txt checks/ 2>/dev/null || true
+if [[ -z "$VERSION" ]]; then
+    err "Could not determine version from pyproject.toml"
+    exit 1
+fi
 
-# Step 3: Build .deb package
-echo -e "${YELLOW}Step 3: Building .deb package...${NC}"
-if command -v dpkg-deb &> /dev/null; then
-    echo -e "${GREEN}dpkg-deb found, building .deb package...${NC}"
-    
-    # Create temporary debian directory structure
-    DEB_BUILD="$BUILD_DIR/debian"
-    mkdir -p "$DEB_BUILD/DEBIAN"
-    mkdir -p "$DEB_BUILD/usr/bin"
-    mkdir -p "$DEB_BUILD/usr/share/doc/whatbroke"
-    mkdir -p "$DEB_BUILD/usr/lib/python3/dist-packages/whatbroke"
-    mkdir -p "$DEB_BUILD/usr/lib/python3/dist-packages/whatbroke/checks"
-    
-    # Create control file
-    cat > "$DEB_BUILD/DEBIAN/control" << EOF
+echo -e "${BLUE}════════════════════════════════════════${NC}"
+echo -e "${BLUE}  whatbroke v${VERSION} — Package Builder  ${NC}"
+echo -e "${BLUE}════════════════════════════════════════${NC}"
+
+# ─── sanity checks ─────────────────────────────────────────────────────────────
+step "Checking prerequisites"
+if [[ ! -d "$PKG_SRC" ]]; then
+    err "Source directory not found: $PKG_SRC"
+    err "Run this script from the repository root."
+    exit 1
+fi
+python3 --version >/dev/null 2>&1 || { err "python3 not found"; exit 1; }
+ok "Source: $PKG_SRC"
+ok "Python: $(python3 --version)"
+
+# ─── clean ─────────────────────────────────────────────────────────────────────
+step "Cleaning previous build artefacts"
+rm -rf "$BUILD_DIR" "$DIST_DIR"
+find "$SCRIPT_DIR" -name "*.pyc" -delete
+find "$SCRIPT_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+mkdir -p "$BUILD_DIR" "$DIST_DIR"
+ok "Clean"
+
+# ─── Python wheel ──────────────────────────────────────────────────────────────
+step "Building Python wheel"
+WHEEL_FILE=""
+if python3 -m build --version >/dev/null 2>&1; then
+    (cd "$SCRIPT_DIR" && python3 -m build --wheel --outdir "$DIST_DIR")
+    WHEEL_FILE=$(find "$DIST_DIR" -name "whatbroke-*.whl" | head -1)
+elif python3 -c "import setuptools, wheel" 2>/dev/null; then
+    (cd "$SCRIPT_DIR" && python3 -m pip wheel --no-deps -w "$DIST_DIR" .)
+    WHEEL_FILE=$(find "$DIST_DIR" -name "whatbroke-*.whl" | head -1)
+else
+    warn "Neither 'build' nor 'wheel' available — skipping wheel"
+    warn "Arch/CachyOS: sudo pacman -S python-build"
+    warn "Other:        pip3 install build"
+fi
+[[ -n "$WHEEL_FILE" ]] && ok "Wheel: $(basename "$WHEEL_FILE")"
+
+# ─── helper: stage Python package files ────────────────────────────────────────
+# Usage: _stage_pkg <destination_python_root>
+# Copies whatbroke/ package tree into <dest>/whatbroke/
+_stage_pkg() {
+    local dest="$1"
+    mkdir -p "$dest/whatbroke/checks"
+    cp "$PKG_SRC"/__init__.py   "$dest/whatbroke/"
+    cp "$PKG_SRC"/cli.py        "$dest/whatbroke/"
+    cp "$PKG_SRC"/result.py     "$dest/whatbroke/"
+    cp "$PKG_SRC/checks/"*.py   "$dest/whatbroke/checks/"
+}
+
+# ─── helper: create the /usr/bin/whatbroke wrapper ─────────────────────────────
+_make_wrapper() {
+    local dest="$1"
+    mkdir -p "$dest/usr/bin"
+    cat > "$dest/usr/bin/whatbroke" << 'WRAPPER'
+#!/usr/bin/python3
+from whatbroke.cli import main
+main()
+WRAPPER
+    chmod 755 "$dest/usr/bin/whatbroke"
+}
+
+# ─── .deb package ──────────────────────────────────────────────────────────────
+step "Building .deb package"
+if command -v dpkg-deb &>/dev/null; then
+    DEB_ROOT="$BUILD_DIR/deb"
+    PY3_DIST="$DEB_ROOT/usr/lib/python3/dist-packages"
+
+    # Debian control file
+    mkdir -p "$DEB_ROOT/DEBIAN"
+    cat > "$DEB_ROOT/DEBIAN/control" << EOF
 Package: whatbroke
-Version: $VERSION
+Version: ${VERSION}
 Section: admin
 Priority: optional
 Architecture: all
-Depends: python3
+Depends: python3 (>= 3.8)
 Maintainer: Emerson <emerson@example.com>
 Description: Linux system diagnostics tool
- whatbroke is a CLI tool that performs comprehensive system health checks
- including disk usage, Docker status, hardware metrics, log analysis,
- networking connectivity, and systemd service status. It provides clear
- status reporting with color-coded output and remediation suggestions.
+ whatbroke performs comprehensive health checks across disk, hardware,
+ services, networking, security, logs, containers, and scheduled tasks.
+ It produces colour-coded output with per-check remediation hints, and
+ can emit JSON for use in monitoring pipelines.
+ .
+ New in 0.2.0: NTP sync check, NIC error detection, OOM event detection,
+ SELinux/AppArmor status, entropy pool check, package manager lock
+ detection, and proper system-wide severity escalation.
 EOF
 
-    # Install files manually
-    cd "$PROJECT_DIR"
-    mkdir -p "$DEB_BUILD/usr/lib/python3/dist-packages/whatbroke"
-    
-    # Copy Python files
-    cp *.py "$DEB_BUILD/usr/lib/python3/dist-packages/whatbroke/" 2>/dev/null || true
-    cp -r checks "$DEB_BUILD/usr/lib/python3/dist-packages/whatbroke/" 2>/dev/null || true
-    
-    # Create executable
-    cat > "$DEB_BUILD/usr/bin/whatbroke" << 'EOF'
-#!/usr/bin/env python3
-import sys
-import os
+    # Stage Python package
+    _stage_pkg "$PY3_DIST"
 
-# Add the library directory to Python path
-lib_dir = "/usr/lib/python3/dist-packages/whatbroke"
-if lib_dir not in sys.path:
-    sys.path.insert(0, lib_dir)
+    # Wrapper script
+    _make_wrapper "$DEB_ROOT"
 
-from cli import main
-
-if __name__ == "__main__":
-    main()
+    # Documentation
+    mkdir -p "$DEB_ROOT/usr/share/doc/whatbroke"
+    cp "$SCRIPT_DIR/README.md" "$DEB_ROOT/usr/share/doc/whatbroke/" 2>/dev/null || true
+    cat > "$DEB_ROOT/usr/share/doc/whatbroke/copyright" << EOF
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: whatbroke
+Upstream-Contact: emerson@example.com
+License: MIT
 EOF
-    
-    chmod +x "$DEB_BUILD/usr/bin/whatbroke"
-    
-    # Move files to correct locations
-    if [ -d "$DEB_BUILD/usr/local/lib/python3.*/dist-packages" ]; then
-        mv "$DEB_BUILD/usr/local/lib/python3.*/dist-packages/whatbroke"* "$DEB_BUILD/usr/lib/python3/dist-packages/" 2>/dev/null || true
-    fi
-    if [ -f "$DEB_BUILD/usr/local/bin/whatbroke" ]; then
-        mv "$DEB_BUILD/usr/local/bin/whatbroke" "$DEB_BUILD/usr/bin/" 2>/dev/null || true
-    fi
-    
-    # Copy documentation
-    cp README.md "$DEB_BUILD/usr/share/doc/whatbroke/" 2>/dev/null || true
-    
-    # Clean up empty directories
-    rm -rf "$DEB_BUILD/usr/local"
-    find "$DEB_BUILD" -type d -empty -delete 2>/dev/null || true
-    
-    # Set proper permissions
-    find "$DEB_BUILD" -type d -exec chmod 755 {} \; 2>/dev/null || true
-    find "$DEB_BUILD" -type f -exec chmod 644 {} \; 2>/dev/null || true
-    chmod 755 "$DEB_BUILD/usr/bin/whatbroke" 2>/dev/null || true
-    
-    # Build the .deb package
-    cd "$BUILD_DIR"
-    dpkg-deb --build debian "$DIST_DIR/whatbroke_${VERSION}_all.deb"
-    
-    echo -e "${GREEN}✓ .deb package created: $DIST_DIR/whatbroke_${VERSION}_all.deb${NC}"
+
+    # Permissions
+    find "$DEB_ROOT" -type d -exec chmod 755 {} \;
+    find "$DEB_ROOT" -type f -exec chmod 644 {} \;
+    chmod 755 "$DEB_ROOT/usr/bin/whatbroke"
+
+    # Build
+    DEB_FILE="$DIST_DIR/whatbroke_${VERSION}_all.deb"
+    dpkg-deb --build "$DEB_ROOT" "$DEB_FILE"
+    ok ".deb: $(basename "$DEB_FILE")"
+    ok "Install: sudo dpkg -i $DEB_FILE"
 else
-    echo -e "${RED}dpkg-deb not found, skipping .deb package${NC}"
-    echo -e "${YELLOW}Install with: sudo apt-get install dpkg-dev${NC}"
+    warn ".deb skipped — dpkg-deb not found"
+    warn "Arch/CachyOS: sudo pacman -S dpkg"
+    warn "Debian/Ubuntu: sudo apt-get install dpkg-dev"
 fi
 
-# Step 4: Build .rpm package
-echo -e "${YELLOW}Step 4: Building .rpm package...${NC}"
-if command -v rpmbuild &> /dev/null; then
-    echo -e "${GREEN}rpmbuild found, building .rpm package...${NC}"
-    
-    # Setup rpmbuild environment
-    mkdir -p "$HOME/rpmbuild/SOURCES" "$HOME/rpmbuild/SPECS" "$HOME/rpmbuild/RPMS/noarch"
-    cp "$DIST_DIR/whatbroke-$VERSION.tar.gz" "$HOME/rpmbuild/SOURCES/"
-    
-    # Create spec file
-    cat > "$HOME/rpmbuild/SPECS/whatbroke.spec" << EOF
+# ─── .rpm package ──────────────────────────────────────────────────────────────
+step "Building .rpm package"
+if command -v rpmbuild &>/dev/null; then
+    RPM_TOPDIR="$BUILD_DIR/rpm"
+    RPM_DB="$BUILD_DIR/rpmdb"
+    RPM_SPEC="$RPM_TOPDIR/SPECS/whatbroke.spec"
+    mkdir -p "$RPM_TOPDIR"/{SPECS,SOURCES,BUILD,RPMS,SRPMS}
+
+    # Initialize a local RPM database so rpmbuild works on non-RPM hosts
+    # (Arch/CachyOS don't have /var/lib/rpm — no root required for a local db)
+    rpm --initdb --dbpath "$RPM_DB" 2>/dev/null || true
+
+    # Source tarball — %prep extracts this; %install copies from it
+    TAR_NAME="whatbroke-${VERSION}"
+    TAR_DIR="$BUILD_DIR/$TAR_NAME"
+    mkdir -p "$TAR_DIR"
+    cp -r "$PKG_SRC" "$TAR_DIR/"
+    cp "$SCRIPT_DIR/README.md" "$TAR_DIR/" 2>/dev/null || true
+    (cd "$BUILD_DIR" && tar -czf "$RPM_TOPDIR/SOURCES/${TAR_NAME}.tar.gz" "$TAR_NAME")
+
+    # Install path: /usr/lib/whatbroke/ avoids Python-version path differences
+    # between the build host and the target RPM system.
+    CHANGELOG_DATE=$(date +"%a %b %d %Y")
+    cat > "$RPM_SPEC" << 'SPEC_EOF'
 Name:           whatbroke
-Version:        $VERSION
-Release:        1%{?dist}
-Summary:        Linux system diagnostics tool
+SPEC_EOF
+    # Append version-dependent lines separately to avoid heredoc quoting issues
+    cat >> "$RPM_SPEC" << SPEC
+Version:        ${VERSION}
+Release:        1
+Summary:        Linux system diagnostics — find what's broken, fix what matters
 
 License:        MIT
 URL:            https://github.com/emerson/whatbroke
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
-BuildRequires:  python3-devel
-BuildRequires:  python3-setuptools
-
-Requires:       python3
+Requires:       python3 >= 3.8
 
 %description
-whatbroke is a CLI tool that performs comprehensive system health checks
-including disk usage, Docker status, hardware metrics, log analysis,
-networking connectivity, and systemd service status. It provides clear
-status reporting with color-coded output and remediation suggestions.
+whatbroke performs comprehensive health checks across disk, hardware,
+services, networking, security, logs, containers, and scheduled tasks.
+It produces colour-coded output with per-check remediation hints, and
+can emit JSON for use in monitoring pipelines or cron jobs.
 
 %prep
-%autosetup
+%setup -q
 
 %build
-%{__python3} setup.py build
+# pure Python — nothing to compile
 
 %install
-%{__python3} setup.py install --root=%{buildroot} --optimize=1 --no-compile
+rm -rf %{buildroot}
+install -d %{buildroot}/usr/lib/whatbroke/whatbroke/checks
+install -d %{buildroot}/usr/bin
+
+cp whatbroke/__init__.py whatbroke/cli.py whatbroke/result.py \\
+    %{buildroot}/usr/lib/whatbroke/whatbroke/
+cp whatbroke/checks/*.py \\
+    %{buildroot}/usr/lib/whatbroke/whatbroke/checks/
+
+cat > %{buildroot}/usr/bin/whatbroke << 'WRAPPER'
+#!/usr/bin/python3
+import sys
+sys.path.insert(0, '/usr/lib/whatbroke')
+from whatbroke.cli import main
+main()
+WRAPPER
+chmod 755 %{buildroot}/usr/bin/whatbroke
 
 %files
-%license LICENSE 2>/dev/null || echo "%doc README.md"
 %doc README.md
-%{python3_sitelib}/whatbroke*
-%{python3_sitelib}/whatbroke-%{version}-py*.egg-info
-%{_bindir}/whatbroke
+/usr/lib/whatbroke/
+/usr/bin/whatbroke
 
 %changelog
-* $(date +"%a %b %d %Y") Emerson <emerson@example.com> - $VERSION-1
-- Initial release of whatbroke Linux system diagnostics tool
-- Comprehensive system health checks
-- Color-coded output with JSON support
-- Docker, systemd, hardware, networking, and log analysis
-EOF
-    
-    # Build the RPM
-    cd "$HOME/rpmbuild/SPECS"
-    rpmbuild -ba whatbroke.spec 2>/dev/null || rpmbuild -bb whatbroke.spec
-    
-    # Copy the built RPM to dist directory
-    find "$HOME/rpmbuild/RPMS" -name "whatbroke-*.noarch.rpm" -exec cp {} "$DIST_DIR/" \;
-    
-    echo -e "${GREEN}✓ .rpm package created in $DIST_DIR/${NC}"
+* ${CHANGELOG_DATE} Emerson <emerson@example.com> - ${VERSION}-1
+- v${VERSION}: proper package structure, all imports fixed
+- New checks: NTP sync, NIC errors, OOM events, SELinux/AppArmor, entropy
+- Replaced netstat with ss; fixed swap usage parsing
+SPEC
+
+    rpmbuild -bb \
+        --define "_topdir $RPM_TOPDIR" \
+        --define "_dbpath $RPM_DB" \
+        "$RPM_SPEC" 2>&1 | tail -30
+
+    RPM_FILE=$(find "$RPM_TOPDIR/RPMS" -name "*.rpm" | head -1)
+    if [[ -n "$RPM_FILE" ]]; then
+        cp "$RPM_FILE" "$DIST_DIR/"
+        ok ".rpm: $(basename "$RPM_FILE")"
+        ok "Install: sudo rpm -i $DIST_DIR/$(basename "$RPM_FILE")"
+    else
+        err ".rpm build failed — see rpmbuild output above"
+    fi
 else
-    echo -e "${RED}rpmbuild not found, skipping .rpm package${NC}"
-    echo -e "${YELLOW}Install with: sudo yum install rpm-build or sudo dnf install rpm-build${NC}"
+    warn ".rpm skipped — rpmbuild not found"
+    warn "Arch/CachyOS: sudo pacman -S rpm-tools"
+    warn "RHEL/Fedora:  sudo dnf install rpm-build"
 fi
 
-# Step 5: Create package-based installation script
-echo -e "${YELLOW}Step 5: Creating package-based installation script...${NC}"
+# ─── install / uninstall helpers ───────────────────────────────────────────────
+step "Writing install/uninstall helpers"
+
 cat > "$DIST_DIR/install.sh" << 'EOF'
 #!/bin/bash
-
-# whatbroke package-based installation script
-set -e
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Get script directory
+# whatbroke — smart installer (picks .deb or .rpm based on the host)
+set -euo pipefail
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo -e "${BLUE}whatbroke Package Installer${NC}"
-echo -e "${BLUE}=========================${NC}"
-echo ""
+[[ "$EUID" -ne 0 ]] && { echo -e "${RED}Run as root: sudo $0${NC}"; exit 1; }
 
-# Detect available packages
-DEB_PACKAGE="$(find "$SCRIPT_DIR" -name "whatbroke_*.deb" | head -1)"
-RPM_PACKAGE="$(find "$SCRIPT_DIR" -name "whatbroke-*.rpm" | head -1)"
+DEB=$(find "$SCRIPT_DIR" -maxdepth 1 -name "whatbroke_*.deb" | head -1)
+RPM=$(find "$SCRIPT_DIR" -maxdepth 1 -name "whatbroke-*.rpm" | head -1)
 
-if [ -z "$DEB_PACKAGE" ] && [ -z "$RPM_PACKAGE" ]; then
-    echo -e "${RED}Error: No packages found in $SCRIPT_DIR${NC}"
-    echo -e "${YELLOW}Please run the build script first to create packages.${NC}"
-    exit 1
-fi
-
-# Detect package manager and install
-if [ -f "$DEB_PACKAGE" ] && command -v dpkg &> /dev/null; then
-    echo -e "${GREEN}Found .deb package and dpkg available${NC}"
-    echo -e "${YELLOW}Installing: $DEB_PACKAGE${NC}"
-    
-    if [ "$EUID" -eq 0 ]; then
-        # Root user
-        dpkg -i "$DEB_PACKAGE"
-        # Fix any missing dependencies
-        apt-get install -f -y 2>/dev/null || true
-    else
-        echo -e "${RED}Root privileges required for package installation${NC}"
-        echo -e "${YELLOW}Please run: sudo $0${NC}"
-        exit 1
-    fi
-    
-elif [ -f "$RPM_PACKAGE" ] && command -v rpm &> /dev/null; then
-    echo -e "${GREEN}Found .rpm package and rpm available${NC}"
-    echo -e "${YELLOW}Installing: $RPM_PACKAGE${NC}"
-    
-    if [ "$EUID" -eq 0 ]; then
-        # Root user
-        rpm -i "$RPM_PACKAGE"
-    else
-        echo -e "${RED}Root privileges required for package installation${NC}"
-        echo -e "${YELLOW}Please run: sudo $0${NC}"
-        exit 1
-    fi
-    
+if [[ -n "$DEB" ]] && command -v dpkg &>/dev/null; then
+    echo -e "${GREEN}Installing .deb package...${NC}"
+    dpkg -i "$DEB"
+    apt-get install -f -y 2>/dev/null || true
+elif [[ -n "$RPM" ]] && command -v rpm &>/dev/null; then
+    echo -e "${GREEN}Installing .rpm package...${NC}"
+    rpm -Uvh "$RPM"
 else
-    echo -e "${RED}Error: No compatible package manager found${NC}"
-    echo -e "${YELLOW}Available packages:${NC}"
-    [ -f "$DEB_PACKAGE" ] && echo -e "  - $(basename "$DEB_PACKAGE")"
-    [ -f "$RPM_PACKAGE" ] && echo -e "  - $(basename "$RPM_PACKAGE")"
-    echo -e "${YELLOW}Required package manager not found:${NC}"
-    [ -f "$DEB_PACKAGE" ] && echo -e "  - dpkg (for .deb packages)"
-    [ -f "$RPM_PACKAGE" ] && echo -e "  - rpm (for .rpm packages)"
+    echo -e "${RED}No compatible package found in $SCRIPT_DIR${NC}"
+    echo -e "${YELLOW}Available: ${DEB:-} ${RPM:-}${NC}"
     exit 1
 fi
-
-echo ""
-echo -e "${GREEN}✓ Installation complete!${NC}"
-echo -e "${YELLOW}Run: whatbroke --help${NC}"
+echo -e "${GREEN}Done! Run: whatbroke --help${NC}"
 EOF
-
 chmod +x "$DIST_DIR/install.sh"
 
-# Step 6: Create uninstall script
-echo -e "${YELLOW}Step 6: Creating uninstall script...${NC}"
 cat > "$DIST_DIR/uninstall.sh" << 'EOF'
 #!/bin/bash
+set -euo pipefail
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+[[ "$EUID" -ne 0 ]] && { echo -e "${RED}Run as root: sudo $0${NC}"; exit 1; }
 
-# whatbroke uninstallation script
-set -e
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-echo -e "${BLUE}whatbroke Uninstaller${NC}"
-echo -e "${BLUE}===================${NC}"
-echo ""
-
-# Check if installed via package manager
-if command -v dpkg &> /dev/null && dpkg -l | grep -q "whatbroke"; then
-    echo -e "${GREEN}Found whatbroke installed via dpkg${NC}"
-    echo -e "${YELLOW}Removing whatbroke package...${NC}"
-    
-    if [ "$EUID" -eq 0 ]; then
-        dpkg -r whatbroke 2>/dev/null || dpkg --purge whatbroke
-    else
-        echo -e "${RED}Root privileges required for package removal${NC}"
-        echo -e "${YELLOW}Please run: sudo $0${NC}"
-        exit 1
-    fi
-    
-elif command -v rpm &> /dev/null && rpm -q whatbroke &>/dev/null; then
-    echo -e "${GREEN}Found whatbroke installed via rpm${NC}"
-    echo -e "${YELLOW}Removing whatbroke package...${NC}"
-    
-    if [ "$EUID" -eq 0 ]; then
-        rpm -e whatbroke
-    else
-        echo -e "${RED}Root privileges required for package removal${NC}"
-        echo -e "${YELLOW}Please run: sudo $0${NC}"
-        exit 1
-    fi
-    
+if command -v dpkg &>/dev/null && dpkg -l whatbroke &>/dev/null 2>&1; then
+    dpkg --purge whatbroke
+elif command -v rpm &>/dev/null && rpm -q whatbroke &>/dev/null 2>&1; then
+    rpm -e whatbroke
 else
-    echo -e "${RED}whatbroke not found installed via package manager${NC}"
-    echo -e "${YELLOW}Checking for manual installation...${NC}"
-    
-    # Check for manual installation
-    MANUAL_LOCATIONS=(
-        "/usr/local/bin/whatbroke"
-        "/usr/bin/whatbroke"
-        "$HOME/.local/bin/whatbroke"
-    )
-    
-    FOUND_MANUAL=false
-    for location in "${MANUAL_LOCATIONS[@]}"; do
-        if [ -f "$location" ]; then
-            echo -e "${YELLOW}Found manual installation at: $location${NC}"
-            FOUND_MANUAL=true
-        fi
-    done
-    
-    if [ "$FOUND_MANUAL" = true ]; then
-        echo -e "${YELLOW}Manual installations must be removed manually:${NC}"
-        echo -e "  sudo rm /usr/local/bin/whatbroke"
-        echo -e "  sudo rm /usr/bin/whatbroke"
-        echo -e "  rm $HOME/.local/bin/whatbroke"
-        echo -e "  sudo rm -rf /usr/local/lib/whatbroke"
-        echo -e "  sudo rm -rf /usr/lib/python3/dist-packages/whatbroke"
-    else
-        echo -e "${YELLOW}whatbroke not found on system${NC}"
-    fi
-    
-    exit 0
+    echo -e "${RED}whatbroke not found in dpkg/rpm database${NC}"
+    exit 1
 fi
-
-echo ""
-echo -e "${GREEN}✓ Uninstallation complete!${NC}"
-echo -e "${YELLOW}Run 'which whatbroke' to verify removal${NC}"
+echo -e "${GREEN}Uninstalled.${NC}"
 EOF
-
 chmod +x "$DIST_DIR/uninstall.sh"
 
-# Clean up build artifacts
-cd "$PROJECT_DIR"
-rm -f setup.py
+# ─── cleanup ───────────────────────────────────────────────────────────────────
+step "Cleaning build temp directory"
 rm -rf "$BUILD_DIR"
+ok "Done"
 
-# Final summary
+# ─── summary ───────────────────────────────────────────────────────────────────
+echo -e "\n${BLUE}════════════════════════════════════════${NC}"
+echo -e "${GREEN}Build complete — whatbroke v${VERSION}${NC}"
+echo -e "${BLUE}════════════════════════════════════════${NC}"
 echo ""
-echo -e "${BLUE}========================================${NC}"
-echo -e "${GREEN}🎉 Build Complete!${NC}"
-echo -e "${BLUE}========================================${NC}"
+echo "Artefacts in ./dist/:"
+ls -lh "$DIST_DIR/" 2>/dev/null || true
 echo ""
-echo -e "${GREEN}Created packages:${NC}"
-ls -la "$DIST_DIR"/*.deb "$DIST_DIR"/*.rpm 2>/dev/null || ls -la "$DIST_DIR"
-
+echo -e "Quick test (local, no install):"
+echo -e "  ${YELLOW}PYTHONPATH=. python3 -m whatbroke.cli --help${NC}"
+echo -e "  ${YELLOW}PYTHONPATH=. python3 -m whatbroke.cli --only disk,hardware${NC}"
 echo ""
-echo -e "${GREEN}Installation commands:${NC}"
-echo -e "  Package-based: ${YELLOW}sudo $DIST_DIR/install.sh${NC}"
-echo -e "  Uninstall:    ${YELLOW}sudo $DIST_DIR/uninstall.sh${NC}"
-echo ""
-if [ -f "$DIST_DIR/whatbroke_${VERSION}_all.deb" ]; then
-    echo -e "${YELLOW}  .deb package available for: ${GREEN}sudo dpkg -i $DIST_DIR/whatbroke_${VERSION}_all.deb${NC}"
-fi
-if [ -f "$DIST_DIR/whatbroke-$VERSION-1.noarch.rpm" ]; then
-    echo -e "${YELLOW}  .rpm package available for: ${GREEN}sudo rpm -i $DIST_DIR/whatbroke-$VERSION-1.noarch.rpm${NC}"
-fi
-
-echo ""
-echo -e "${GREEN}Test the installation:${NC}"
-echo -e "  ${YELLOW}whatbroke --help${NC}"
-echo -e "  ${YELLOW}whatbroke --only disk,hardware${NC}"
-
-# Test the locally built version if it exists
-if command -v "$PROJECT_DIR/cli.py" &> /dev/null || [ -f "$PROJECT_DIR/cli.py" ]; then
-    echo ""
-    echo -e "${YELLOW}Quick test of built version:${NC}"
-    python3 "$PROJECT_DIR/cli.py" --help | head -3
-fi
+echo -e "Install:"
+echo -e "  ${YELLOW}sudo $DIST_DIR/install.sh${NC}"

@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "whatbroke"
-version = "0.1.0"
-description = "Linux system diagnostics tool"
+version = "0.2.0"
+description = "Linux system diagnostics — find what's broken, fix what matters"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -34,13 +34,10 @@ dependencies = []
 whatbroke = "whatbroke.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/emerson/whatbroke"
+Homepage   = "https://github.com/emerson/whatbroke"
 Repository = "https://github.com/emerson/whatbroke"
-Issues = "https://github.com/emerson/whatbroke/issues"
+Issues     = "https://github.com/emerson/whatbroke/issues"
 
-[tool.setuptools]
-packages = ["whatbroke", "whatbroke.checks"]
-
-[tool.setuptools.package-dir]
-whatbroke = "."
-"whatbroke.checks" = "checks"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["whatbroke*"]
