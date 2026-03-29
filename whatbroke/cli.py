@@ -1,8 +1,10 @@
 import argparse
 import json
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
 from .checks import discover_checks
 from .result import Result, SEVERITY
@@ -16,8 +18,10 @@ class Colors:
     MAGENTA  = '\033[95m'
     CYAN     = '\033[96m'
     WHITE    = '\033[97m'
+    DIM      = '\033[2m'
     BOLD     = '\033[1m'
     END      = '\033[0m'
+    CLEAR    = '\033[2J\033[H'   # clear screen + move cursor home
 
 
 def _color(status: str) -> str:
@@ -50,6 +54,54 @@ _BANNER = r"""
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
+# ── State file (tracks first-seen timestamps for issues) ─────────────────────
+
+_STATE_DIR  = os.path.expanduser("~/.local/share/whatbroke")
+_STATE_FILE = os.path.join(_STATE_DIR, "state.json")
+
+
+def _load_state() -> dict:
+    try:
+        with open(_STATE_FILE) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_state(results: list[Result]) -> dict:
+    """Persist current check statuses; return dict of new-issue names."""
+    now   = datetime.now(timezone.utc).isoformat()
+    old   = _load_state()
+    new   = {}
+    fresh = set()
+
+    for r in results:
+        key = r.name
+        if r.status != "OK":
+            if key not in old or old[key]["status"] == "OK":
+                fresh.add(key)
+            new[key] = {
+                "status":     r.status,
+                "message":    r.message,
+                "first_seen": old.get(key, {}).get("first_seen", now)
+                              if r.status != "OK" else now,
+                "last_seen":  now,
+            }
+        # OK results are not persisted — they clear any prior entry
+
+    os.makedirs(_STATE_DIR, exist_ok=True)
+    with open(_STATE_FILE, "w") as f:
+        json.dump(new, f, indent=2)
+
+    return fresh
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _severity_key(r: Result) -> int:
+    """Higher number = shown first (CRIT=3, WARN=1, OK=0)."""
+    return -SEVERITY[r.status]
+
 
 def _print_header() -> None:
     print(Colors.BOLD + Colors.CYAN + _BANNER + Colors.END)
@@ -62,9 +114,10 @@ def _run_one(name: str, fn) -> Result:
         return Result(name, "CRIT", "check raised an exception", [str(exc)])
 
 
-def _print_result(r: Result, verbose: bool) -> None:
-    c = _color(r.status)
-    print(f"{Colors.BOLD}{r.name}{Colors.END}: {c}{r.status}{Colors.END}  {r.message}")
+def _print_result(r: Result, verbose: bool, new: bool = False) -> None:
+    c    = _color(r.status)
+    tag  = f" {Colors.BOLD}{Colors.CYAN}[NEW]{Colors.END}" if new else ""
+    print(f"{Colors.BOLD}{r.name}{Colors.END}: {c}{r.status}{Colors.END}  {r.message}{tag}")
     if verbose:
         for d in r.details:
             print(f"  {Colors.CYAN}•{Colors.END} {d}")
@@ -73,31 +126,58 @@ def _print_result(r: Result, verbose: bool) -> None:
     print()
 
 
+def _run_checks(checks: dict, max_workers: int = 8) -> tuple[dict, float]:
+    """Run all checks in parallel. Returns (results_map, elapsed_seconds)."""
+    t_start = time.monotonic()
+    results_map: dict = {}
+    with ThreadPoolExecutor(max_workers=min(len(checks), max_workers)) as pool:
+        futures = {pool.submit(_run_one, name, fn): name
+                   for name, fn in checks.items()}
+        for fut in as_completed(futures):
+            r = fut.result()
+            results_map[r.name] = r
+    return results_map, time.monotonic() - t_start
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main() -> None:
     from . import __version__
 
     p = argparse.ArgumentParser(prog="whatbroke",
                                 description="Linux system diagnostics tool")
     p.add_argument("--version", action="version", version=f"whatbroke {__version__}")
+
+    # Output modes
     p.add_argument("--compact", action="store_true",
                    help="One line per broken check (good for scripts/cron)")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Show details and remediation hints")
-    p.add_argument("--only", metavar="CHECK,...",
-                   help="Run only the specified checks (comma-separated)")
-    p.add_argument("--skip", metavar="CHECK,...",
-                   help="Skip the specified checks (comma-separated)")
+    p.add_argument("-b", "--broken-only", action="store_true",
+                   help="Only show checks that are not OK")
     p.add_argument("--json", action="store_true",
                    help="Output results as JSON")
     p.add_argument("--no-color", action="store_true",
                    help="Disable ANSI colour output")
+
+    # Filtering
+    p.add_argument("--only", metavar="CHECK,...",
+                   help="Run only the specified checks (comma-separated)")
+    p.add_argument("--skip", metavar="CHECK,...",
+                   help="Skip the specified checks (comma-separated)")
+
+    # Behaviour
+    p.add_argument("--watch", metavar="SECONDS", type=int, nargs="?", const=5,
+                   help="Refresh every N seconds (default 5). Ctrl-C to stop.")
+    p.add_argument("--diff", action="store_true",
+                   help="Only show checks that are new/newly broken since last run")
+    p.add_argument("--no-state", action="store_true",
+                   help="Do not read or write the state file (~/.local/share/whatbroke/state.json)")
+
     args = p.parse_args()
 
     if args.no_color:
         _disable_colors()
-
-    if not args.compact and not args.json:
-        _print_header()
 
     checks = discover_checks()
 
@@ -109,40 +189,48 @@ def main() -> None:
         skip = set(args.skip.split(","))
         checks = {k: v for k, v in checks.items() if k not in skip}
 
-    # ── Run all checks in parallel ──────────────────────────────────────────
-    # Each check is independent (reads files / runs subprocesses) so
-    # thread-parallelism is safe and cuts total runtime to ~max(check times)
-    # instead of sum(check times).  Cap workers at 8 to avoid spawning too
-    # many subprocesses at once on resource-constrained machines.
-    t_start = time.monotonic()
-    results_map: dict = {}
+    # ── watch loop ────────────────────────────────────────────────────────────
+    if args.watch is not None:
+        interval = max(args.watch, 1)
+        try:
+            while True:
+                _run_single(checks, args, watch_interval=interval)
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            print()
+            sys.exit(0)
+    else:
+        sys.exit(_run_single(checks, args))
 
-    with ThreadPoolExecutor(max_workers=min(len(checks), 8)) as pool:
-        futures = {pool.submit(_run_one, name, fn): name
-                   for name, fn in checks.items()}
 
-        # In pretty non-verbose mode print each result as it arrives so the
-        # operator sees fast checks (hardware, services) immediately while
-        # slow ones (logs, security/apt, networking) are still running.
-        if not args.compact and not args.json and not args.verbose:
-            for fut in as_completed(futures):
-                r = fut.result()
-                results_map[r.name] = r
-                _print_result(r, verbose=False)
-        else:
-            for fut in as_completed(futures):
-                r = fut.result()
-                results_map[r.name] = r
+def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
+    """Run one pass of all checks. Returns exit code."""
+    # In watch mode clear the screen before printing
+    if watch_interval is not None:
+        print(Colors.CLEAR, end="")
 
-    elapsed = time.monotonic() - t_start
+    show_banner = not args.compact and not args.json
+    if show_banner and watch_interval is None:
+        _print_header()
 
-    # Sort results alphabetically for consistent ordering in all output modes.
-    results = [results_map[name] for name in sorted(results_map)]
+    # ── Run checks ────────────────────────────────────────────────────────────
+    results_map, elapsed = _run_checks(checks)
+
+    # Sort by severity (worst first), then alphabetically within same severity
+    results = sorted(
+        results_map.values(),
+        key=lambda r: (-SEVERITY[r.status], r.name),
+    )
 
     worst = max(results, key=lambda r: SEVERITY[r.status]).status \
             if results else "OK"
 
-    # ── compact ─────────────────────────────────────────────────────────────
+    # ── State file ────────────────────────────────────────────────────────────
+    new_issues: set = set()
+    if not args.no_state and not args.compact and not args.json:
+        new_issues = _save_state(results)
+
+    # ── compact ───────────────────────────────────────────────────────────────
     if args.compact:
         bad = [r for r in results if r.status != "OK"]
         if not bad:
@@ -150,10 +238,11 @@ def main() -> None:
         else:
             for r in bad:
                 c = _color(r.status)
-                print(f"{r.name}:{c}{r.status}{Colors.END} {r.message}")
-        sys.exit(SEVERITY[worst])
+                new_tag = " [NEW]" if r.name in new_issues else ""
+                print(f"{r.name}:{c}{r.status}{Colors.END} {r.message}{new_tag}")
+        return SEVERITY[worst]
 
-    # ── JSON ────────────────────────────────────────────────────────────────
+    # ── JSON ──────────────────────────────────────────────────────────────────
     if args.json:
         print(json.dumps([
             {
@@ -165,23 +254,57 @@ def main() -> None:
             }
             for r in results
         ], indent=2))
-        sys.exit(SEVERITY[worst])
+        return SEVERITY[worst]
 
-    # ── verbose: print all results in sorted order with details ─────────────
-    if args.verbose:
-        for r in results:
-            _print_result(r, verbose=True)
+    # ── pretty output ─────────────────────────────────────────────────────────
+    if watch_interval is not None:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{Colors.BOLD}{Colors.CYAN}WhatBroke{Colors.END}  "
+              f"{Colors.DIM}{ts}  refreshing every {watch_interval}s  "
+              f"(Ctrl-C to stop){Colors.END}\n")
 
-    # ── summary line ────────────────────────────────────────────────────────
-    c = _color(worst)
+    # --diff: show only checks that became broken since last run
+    display = results
+    if args.diff:
+        display = [r for r in results if r.name in new_issues]
+        if not display:
+            c = _color(worst)
+            print(f"{Colors.GREEN}No new issues since last run.{Colors.END}  "
+                  f"(overall: {c}{worst}{Colors.END})\n")
+            return SEVERITY[worst]
+
+    # --broken-only: hide OK checks
+    if args.broken_only:
+        display = [r for r in display if r.status != "OK"]
+        if not display:
+            print(f"{Colors.GREEN}All checks OK.{Colors.END}\n")
+            return SEVERITY[worst]
+
+    for r in display:
+        _print_result(r, verbose=args.verbose, new=(r.name in new_issues))
+
+    # ── summary ───────────────────────────────────────────────────────────────
+    c     = _color(worst)
     n_bad = sum(1 for r in results if r.status != "OK")
+    ts    = datetime.now().strftime("%H:%M:%S")
+
     summary = f"{Colors.BOLD}Overall:{Colors.END} {c}{worst}{Colors.END}"
     if n_bad:
-        summary += f"  ({n_bad} check{'s' if n_bad != 1 else ''} need attention)"
-    summary += f"  {Colors.BLUE}{elapsed:.1f}s{Colors.END}"
+        crit_n = sum(1 for r in results if r.status == "CRIT")
+        warn_n = sum(1 for r in results if r.status == "WARN")
+        parts  = []
+        if crit_n:
+            parts.append(f"{Colors.RED}{crit_n} CRIT{Colors.END}")
+        if warn_n:
+            parts.append(f"{Colors.YELLOW}{warn_n} WARN{Colors.END}")
+        summary += "  " + "  ".join(parts)
+    summary += (f"  {Colors.DIM}{len(results)} checks  "
+                f"{elapsed:.1f}s  {ts}{Colors.END}")
+    if new_issues and not args.diff:
+        summary += f"  {Colors.CYAN}{Colors.BOLD}{len(new_issues)} new{Colors.END}"
     print(summary)
 
-    sys.exit(SEVERITY[worst])
+    return SEVERITY[worst]
 
 
 if __name__ == "__main__":

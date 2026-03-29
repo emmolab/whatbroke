@@ -16,7 +16,8 @@ def _get_disk_usage():
         ['tmpfs', 'devtmpfs', 'proc', 'sysfs', 'devpts',
          'cgroup', 'cgroup2', 'pstore', 'securityfs', 'debugfs',
          'tracefs', 'configfs', 'fusectl', 'hugetlbfs', 'mqueue',
-         'ramfs', 'squashfs', 'overlay']
+         'ramfs', 'squashfs', 'overlay', 'efivarfs', 'bpf',
+         'autofs', 'rpc_pipefs', 'nfsd']
     )
     try:
         proc = _run(
@@ -33,6 +34,9 @@ def _get_disk_usage():
             size, used, avail = parts[3], parts[4], parts[5]
             pct_str = parts[6].rstrip('%')
             if fstype in skip_types:
+                continue
+            # Skip FUSE mounts under /tmp — AppImages and similar are RO by design
+            if fstype.startswith("fuse.") and target.startswith("/tmp/"):
                 continue
             filesystems.append({
                 'source':       source,
@@ -80,7 +84,15 @@ def _check_smart_health():
         return issues
     try:
         for device in sorted(os.listdir('/dev/')):
-            if not (device.startswith('sd') or device.startswith('nvme')) or len(device) > 7:
+            if device.startswith('sd'):
+                # sda, sdb … are whole disks; sda1, sda2 … are partitions — skip them
+                if len(device) != 3 or not device[2].isalpha():
+                    continue
+            elif device.startswith('nvme'):
+                # nvme0n1 is a whole disk; nvme0n1p1 is a partition — skip partitions
+                if 'p' in device.split('n')[-1]:
+                    continue
+            else:
                 continue
             dev_path = f'/dev/{device}'
             try:
@@ -122,6 +134,9 @@ def _check_readonly_remounts():
                     continue
                 device, mountpoint, fstype, options = parts[0], parts[1], parts[2], parts[3]
                 if fstype in _SKIP_TYPES:
+                    continue
+                # FUSE filesystems (AppImage, gvfs, sshfs, etc.) are often intentionally RO
+                if fstype.startswith("fuse."):
                     continue
                 # ro appears as the first option or comma-separated; rw means writable
                 opt_set = set(options.split(","))
