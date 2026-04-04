@@ -15,7 +15,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
-Linux system diagnostics tool for sysadmins. Runs 12 health checks in parallel, sorts results by severity, and tells you exactly what to fix.
+Linux system diagnostics tool for sysadmins. Runs 12 health checks in parallel, sorts results by severity, and aims for conservative, trustworthy findings instead of noisy red ink.
 
 ---
 
@@ -49,11 +49,11 @@ Results are sorted worst-first (CRIT → WARN → OK).
 | Check | What it looks at |
 |-------|-----------------|
 | `disk` | Filesystem usage (>80% WARN, >90% CRIT), inodes, SMART health, RAID/LVM degradation, read-only remounts caused by I/O errors |
-| `hardware` | CPU load, memory, swap, temperatures, uptime (>365 days WARN) |
-| `services` | Failed/activating systemd units, zombie processes, package manager lock files |
-| `logs` | Critical journal entries, kernel errors, OOM killer events |
+| `hardware` | CPU load, memory, swap, temperatures, uptime context |
+| `services` | Failed systemd units, stale zombie processes, package manager lock files |
+| `logs` | Critical journal entries, repeated error storms, kernel/OOM events |
 | `networking` | Internet/DNS reachability, NTP sync, NIC errors and drops |
-| `security` | Failed SSH logins, SELinux/AppArmor status, entropy pool |
+| `security` | Failed SSH logins, update backlog context, SSH policy, cert expiry, SELinux/AppArmor, entropy pool |
 | `sysctl` | Kernel hardening parameters (ASLR, syncookies, ICMP redirects, rp_filter, kptr_restrict, etc.) |
 | `firewall` | nftables / iptables / ufw / firewalld active status |
 | `users` | Extra UID-0 accounts, empty passwords, `NOPASSWD:ALL` sudoers grants |
@@ -219,7 +219,7 @@ disk:      CRIT  2 full drives  [NEW]
 logs:      CRIT  54 critical journal entries, 50 kernel issues
 scheduled: CRIT  cron service down
 networking: WARN  2 NIC error(s)
-services:  WARN  1 zombie(s)
+services:  WARN  3 stale zombie(s)
 sysctl:    WARN  2 sysctl misconfiguration(s)
 containers: OK   All container/virtualisation checks passed
 firewall:  OK    Firewall active
@@ -256,6 +256,7 @@ Requirements for package building:
 ## Requirements
 
 - Python 3.10+
+- Designed for Linux servers and headless/admin use cases first
 - Linux (any distribution)
 - No mandatory external dependencies — all checks degrade gracefully when optional tools are absent
 
@@ -268,6 +269,19 @@ Requirements for package building:
 - `sensors` — CPU/GPU temperature
 
 ---
+
+## Philosophy
+
+`whatbroke` is intentionally conservative:
+- transient noise should stay informational where possible
+- repeated or clearly actionable failures should rise to WARN/BROKE/CRIT
+- output should help an on-call Linux admin decide what to inspect next
+
+Recent behavior changes in `0.3.0`:
+- zombie detection now looks for long-lived zombies using `ps` fields like PID, PPID, STAT, ELAPSED, and COMMAND
+- small non-security package backlogs are informational instead of warnings
+- ordinary low-volume journal/kernel noise is de-emphasised; repeated storms and severe events still alert loudly
+- hardware thresholds are less jumpy on long-lived servers
 
 ## License
 
