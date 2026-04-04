@@ -21,7 +21,22 @@ Linux system diagnostics tool for sysadmins. Runs 12 health checks in parallel, 
 
 ## Quick Start
 
-**Install from package (recommended):**
+**Install or upgrade from the latest GitHub Release (recommended):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh
+```
+
+The installer:
+- detects whether the host uses `dpkg`/APT or `rpm`/DNF/YUM/Zypper
+- downloads the matching `.deb` or `.rpm` from the latest GitHub Release
+- installs it, or upgrades an existing installation in place
+
+**Install a specific release:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --version v0.3.0
+```
+
+**Build packages locally:**
 ```bash
 ./build-packages.sh
 sudo ./dist/install.sh
@@ -29,12 +44,12 @@ sudo ./dist/install.sh
 
 **Run without installing:**
 ```bash
-git clone https://github.com/emerson/whatbroke.git
+git clone https://github.com/emmolab/whatbroke.git
 cd whatbroke
 PYTHONPATH=. python3 -m whatbroke.cli
 ```
 
-**pip install:**
+**pip install (development/local use):**
 ```bash
 pip install -e .
 whatbroke
@@ -233,23 +248,72 @@ Overall: CRIT  3 CRIT  3 WARN  12 checks  0.6s  21:23:59  1 new
 
 ---
 
-## Building packages
+## Releases, packaging, and upgrades
+
+### What gets published
+
+Create a GitHub Release from a version tag and GitHub will automatically provide the source archive (`.tar.gz` and `.zip`) for that tag. The included Actions workflow then builds and uploads these additional release assets:
+
+- `whatbroke-<version>.tar.gz` (sdist)
+- `whatbroke-<version>-py3-none-any.whl`
+- `whatbroke_<version>_all.deb`
+- `whatbroke-<version>-1.noarch.rpm`
+- local helper scripts in `dist/` (`install.sh`, `uninstall.sh`) when building manually
+
+### Build packages locally
 
 ```bash
-# Produces ./dist/whatbroke-*.whl + .deb + .rpm
+# Produces ./dist/*.tar.gz, *.whl, *.deb, *.rpm (where toolchain is available)
 ./build-packages.sh
 
-# Install on the current host (auto-detects dpkg vs rpm)
+# Install the local build on this host
 sudo ./dist/install.sh
 
-# Uninstall
+# Remove a local dpkg/rpm installation
 sudo ./dist/uninstall.sh
 ```
 
-Requirements for package building:
-- `.whl`: `python3 -m build` — `sudo pacman -S python-build` / `pip install build`
-- `.deb`: `dpkg-deb` — `sudo pacman -S dpkg` / `sudo apt install dpkg-dev`
-- `.rpm`: `rpmbuild` — `sudo pacman -S rpm-tools` / `sudo dnf install rpm-build`
+Requirements for local package building:
+- Python artifacts: `python3 -m build` (`python3 -m pip install build`)
+- `.deb`: `dpkg-deb` (`apt install dpkg-dev` or equivalent)
+- `.rpm`: `rpmbuild` (`dnf install rpm-build` / `apt install rpm` or equivalent)
+
+### GitHub Release automation
+
+`.github/workflows/release.yml` runs on `release.published` and:
+
+1. checks out the tagged source
+2. builds sdist + wheel + `.deb` + `.rpm`
+3. uploads them to the workflow run
+4. attaches them to the published GitHub Release
+
+That means a release page ends up with:
+- GitHub's automatic source `.zip` and `.tar.gz`
+- built installable packages for Debian-family and RPM-family systems
+
+### Auto-install / upgrade script
+
+The repo-root `install.sh` is designed to be hosted directly from GitHub and used as either a first install or an upgrade path.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh
+```
+
+It will:
+- detect Linux + package format (`.deb` vs `.rpm`)
+- resolve the latest GitHub Release via the GitHub API
+- download the matching asset
+- install or upgrade with `dpkg -i` or `rpm -Uvh`
+
+Useful flags:
+
+```bash
+# Pin a specific tag
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --version v0.3.0
+
+# Preview the chosen asset URL only
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --dry-run
+```
 
 ---
 
