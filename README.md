@@ -1,18 +1,14 @@
 # whatbroke
 
-```
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                                                                              ║
-║   __          ___           _   ____            _                            ║
-║   \ \        / / |         | | |  _ \          | |                           ║
-║    \ \  /\  / /| |__   __ _| |_| |_) |_ __ ___ | | _____                    ║
-║     \ \/  \/ / | '_ \ / _` | __|  _ <| '__/ _ \| |/ / _ \                   ║
-║      \  /\  /  | | | | (_| | |_| |_) | | | (_) |   <  __/                   ║
-║       \/  \/   |_| |_|\__,_|\__|____/|_|  \___/|_|\_\___|                   ║
-║                                                                              ║
-║                   Find what's broken.  Fix what matters.                     ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+```text
+ __          ___           _   ____            _
+ \ \        / / |         | | |  _ \          | |
+  \ \  /\  / /| |__   __ _| |_| |_) |_ __ ___ | | _____
+   \ \/  \/ / | '_ \ / _` | __|  _ <| '__/ _ \| |/ / _ \
+    \  /\  /  | | | | (_| | |_| |_) | | | (_) |   <  __/
+     \/  \/   |_| |_|\__,_|\__|____/|_|  \___/|_|\_\___|
+
+ Find what's broken. Fix what matters.
 ```
 
 Linux system diagnostics tool for sysadmins. Runs 12 health checks in parallel, sorts results by severity, and aims for conservative, trustworthy findings instead of noisy red ink.
@@ -26,10 +22,19 @@ Linux system diagnostics tool for sysadmins. Runs 12 health checks in parallel, 
 curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh
 ```
 
+**Uninstall:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/uninstall.sh | sh
+```
+
 The installer:
 - detects whether the host uses `dpkg`/APT or `rpm`/DNF/YUM/Zypper
 - downloads the matching `.deb` or `.rpm` from the latest GitHub Release
 - installs it, or upgrades an existing installation in place
+
+The uninstaller:
+- removes `whatbroke` via `dpkg`, `rpm`, `pip`, or `pip3` depending on how it was installed
+- is safe to re-run if you want a simple removal command for docs or automation
 
 **Install a specific release:**
 ```bash
