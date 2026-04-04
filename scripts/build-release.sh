@@ -151,7 +151,6 @@ install -m 0755 ${PKG_NAME}.sh %{buildroot}%{_bindir}/${PKG_NAME}
 %doc README.md
 %{_bindir}/${PKG_NAME}
 /usr/lib/python3.12/site-packages/whatbroke
-/usr/lib/python3.12/site-packages/whatbroke/*
 
 %changelog
 * $(LC_ALL=C date '+%a %b %d %Y') Emerson <emerson@example.com> - ${VERSION}-1
