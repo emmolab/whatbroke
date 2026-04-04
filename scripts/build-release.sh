@@ -142,16 +142,16 @@ It sorts findings by severity and is intended for practical Linux diagnostics.
 %install
 rm -rf %{buildroot}
 install -d %{buildroot}%{_bindir}
-install -d %{buildroot}%{python3_sitelib}/whatbroke
-cp -a whatbroke/. %{buildroot}%{python3_sitelib}/whatbroke/
+install -d %{buildroot}/usr/lib/python3.12/site-packages/whatbroke
+cp -a whatbroke/. %{buildroot}/usr/lib/python3.12/site-packages/whatbroke/
 install -m 0755 ${PKG_NAME}.sh %{buildroot}%{_bindir}/${PKG_NAME}
 
 %files
 %license LICENSE
 %doc README.md
 %{_bindir}/${PKG_NAME}
-%{python3_sitelib}/whatbroke
-%{python3_sitelib}/whatbroke/*
+/usr/lib/python3.12/site-packages/whatbroke
+/usr/lib/python3.12/site-packages/whatbroke/*
 
 %changelog
 * $(LC_ALL=C date '+%a %b %d %Y') Emerson <emerson@example.com> - ${VERSION}-1
