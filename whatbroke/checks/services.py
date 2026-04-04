@@ -1,8 +1,14 @@
 import os
 import shutil
 import subprocess
+from collections import Counter
 
 from ..result import Result, escalate
+
+_ZOMBIE_GRACE_SECONDS = 300
+_ZOMBIE_WARN_COUNT = 3
+_ZOMBIE_CRIT_COUNT = 10
+_ZOMBIE_DETAIL_LIMIT = 8
 
 
 def _run(cmd, timeout=10):
@@ -23,53 +29,89 @@ def _check_failed_systemd_services() -> list:
     return failed
 
 
-def _check_zombie_processes() -> tuple:
-    """Return (count, details_list) of zombie processes."""
-    count, details = 0, []
+def _parse_ps_zombies(ps_output: str) -> list[dict]:
+    zombies = []
+    for raw in ps_output.strip().splitlines()[1:]:
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            continue
+        pid, ppid, stat, etimes, comm = parts
+        if "Z" not in stat:
+            continue
+        try:
+            zombies.append(
+                {
+                    "pid": int(pid),
+                    "ppid": int(ppid),
+                    "stat": stat,
+                    "etimes": int(etimes),
+                    "comm": comm,
+                }
+            )
+        except ValueError:
+            continue
+    return zombies
+
+
+def _summarize_zombies(zombies: list[dict]) -> dict:
+    stale = [z for z in zombies if z["etimes"] >= _ZOMBIE_GRACE_SECONDS]
+    transient = [z for z in zombies if z["etimes"] < _ZOMBIE_GRACE_SECONDS]
+    parent_counts = Counter(z["ppid"] for z in stale)
+    commands = Counter(z["comm"] for z in stale)
+    oldest = sorted(stale, key=lambda z: (-z["etimes"], z["pid"]))
+    return {
+        "all": zombies,
+        "stale": stale,
+        "transient": transient,
+        "parent_counts": parent_counts,
+        "commands": commands,
+        "oldest": oldest,
+    }
+
+
+def _check_zombie_processes() -> dict:
+    """Return parsed zombie information using richer ps fields."""
     try:
-        proc = _run(["ps", "-eo", "pid,stat,comm"], timeout=10)
-        for line in proc.stdout.strip().splitlines()[1:]:
-            parts = line.split()
-            if len(parts) >= 3 and 'Z' in parts[1]:
-                count += 1
-                details.append(f"PID {parts[0]}: {parts[2]} (zombie)")
+        proc = _run(["ps", "-eo", "pid=,ppid=,stat=,etimes=,comm="], timeout=10)
+        if proc.returncode != 0:
+            return {"all": [], "stale": [], "transient": [], "parent_counts": Counter(), "commands": Counter(), "oldest": []}
+        return _summarize_zombies(_parse_ps_zombies(proc.stdout))
     except Exception:
-        pass
-    return count, details
+        return {"all": [], "stale": [], "transient": [], "parent_counts": Counter(), "commands": Counter(), "oldest": []}
 
 
-def _check_pkg_manager_locks() -> list:
+def _check_pkg_manager_locks() -> tuple[list[str], list[str]]:
     """Detect stale or active package manager lock files."""
-    issues = []
+    issues: list[str] = []
+    remediation_notes: list[str] = []
     lock_files = [
-        ("/var/lib/dpkg/lock-frontend",    "apt"),
-        ("/var/lib/dpkg/lock",             "apt"),
-        ("/var/cache/apt/archives/lock",   "apt"),
-        ("/var/lib/rpm/.rpm.lock",         "rpm"),
-        ("/var/lib/pacman/db.lck",         "pacman"),
-        ("/var/run/yum.pid",               "yum"),
-        ("/var/run/dnf.pid",               "dnf"),
+        ("/var/lib/dpkg/lock-frontend", "apt"),
+        ("/var/lib/dpkg/lock", "apt"),
+        ("/var/cache/apt/archives/lock", "apt"),
+        ("/var/lib/rpm/.rpm.lock", "rpm"),
+        ("/var/lib/pacman/db.lck", "pacman"),
+        ("/var/run/yum.pid", "yum"),
+        ("/var/run/dnf.pid", "dnf"),
     ]
     for lock_path, manager in lock_files:
         if not os.path.exists(lock_path):
             continue
-        # Check if the locking process is still alive
-        alive = False
         try:
             import fcntl
-            with open(lock_path, 'r') as fh:
+            with open(lock_path, "r") as fh:
                 try:
                     fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     fcntl.flock(fh, fcntl.LOCK_UN)
-                    # Lock acquired → previous holder is gone → stale lock
-                    issues.append(f"Stale {manager} lock: {lock_path} (process dead)")
+                    issues.append(f"Stale {manager} lock: {lock_path} (holder no longer running)")
+                    remediation_notes.append(f"Verify no {manager} transaction is active, then remove {lock_path}")
                 except (IOError, OSError):
-                    # Lock held → active package manager operation
-                    issues.append(f"{manager} is currently running ({lock_path} locked)")
-                    alive = True
+                    issues.append(f"{manager} transaction in progress: {lock_path} is locked")
         except Exception:
             issues.append(f"{manager} lock file present: {lock_path}")
-    return issues
+    return issues, remediation_notes
 
 
 def _check_listening_ports() -> list:
@@ -82,15 +124,14 @@ def _check_listening_ports() -> list:
             parts = line.split()
             if len(parts) < 5:
                 continue
-            proto       = parts[0]
-            local_addr  = parts[4] if shutil.which("ss") else parts[3]
-            # Handle [::]:port and 0.0.0.0:port
-            if local_addr.startswith('['):
-                bracket_end = local_addr.rfind(']')
-                ip   = local_addr[1:bracket_end]
+            proto = parts[0]
+            local_addr = parts[4] if shutil.which("ss") else parts[3]
+            if local_addr.startswith("["):
+                bracket_end = local_addr.rfind("]")
+                ip = local_addr[1:bracket_end]
                 port = local_addr[bracket_end + 2:]
-            elif ':' in local_addr:
-                ip, port = local_addr.rsplit(':', 1)
+            elif ":" in local_addr:
+                ip, port = local_addr.rsplit(":", 1)
             else:
                 continue
             sockets.append((proto, ip, port))
@@ -102,62 +143,89 @@ def _check_listening_ports() -> list:
 def check() -> Result:
     """Systemd failed units, zombie processes, package manager locks."""
     details = []
-    status  = "OK"
-    remediation = None
+    status = "OK"
+    remediation_parts = []
 
-    # Failed systemd services — CRIT
     failed = _check_failed_systemd_services()
     if failed:
-        for svc in failed:
-            details.append(f"Failed unit: {svc}")
+        details.append(f"Systemd failed units: {len(failed)}")
+        details.extend(f"Failed unit: {svc}" for svc in failed[:10])
         status = escalate(status, "CRIT")
-        remediation = "systemctl status <unit> && journalctl -u <unit> -n 50"
+        remediation_parts.append("Inspect failed units with: systemctl status <unit> && journalctl -u <unit> -n 50")
     else:
         details.append("Systemd: no failed units")
 
-    # Zombie processes — WARN
-    zombie_count, zombie_details = _check_zombie_processes()
-    if zombie_count:
-        details.append(f"Zombie processes: {zombie_count}")
-        details.extend(zombie_details[:10])
-        status = escalate(status, "WARN")
-        remediation = remediation or "Identify zombie parent: ps -eo pid,ppid,stat,comm | grep Z"
+    zombie_info = _check_zombie_processes()
+    stale_zombies = zombie_info["stale"]
+    transient_zombies = zombie_info["transient"]
+    total_zombies = len(zombie_info["all"])
+    if stale_zombies:
+        oldest_age = stale_zombies[0]["etimes"] if zombie_info["oldest"] else 0
+        details.append(
+            f"Zombie processes: {len(stale_zombies)} stale (>{_ZOMBIE_GRACE_SECONDS}s), {len(transient_zombies)} transient (<={_ZOMBIE_GRACE_SECONDS}s)"
+        )
+        for zombie in zombie_info["oldest"][:_ZOMBIE_DETAIL_LIMIT]:
+            details.append(
+                "Zombie PID {pid} ppid {ppid} stat {stat} age {etimes}s comm {comm}".format(**zombie)
+            )
+        if zombie_info["parent_counts"]:
+            parent_summary = ", ".join(
+                f"PPID {ppid}: {count}" for ppid, count in zombie_info["parent_counts"].most_common(3)
+            )
+            details.append(f"Zombie parents: {parent_summary}")
+        if zombie_info["commands"]:
+            command_summary = ", ".join(
+                f"{comm}: {count}" for comm, count in zombie_info["commands"].most_common(3)
+            )
+            details.append(f"Zombie commands: {command_summary}")
+        sev = "CRIT" if len(stale_zombies) >= _ZOMBIE_CRIT_COUNT else "WARN"
+        status = escalate(status, sev)
+        remediation_parts.append(
+            "Identify the stuck parent process before restarting anything: ps -o pid,ppid,stat,etimes,comm -p <ppid>"
+        )
+        remediation_parts.append(
+            "If the parent is unhealthy, restart the owning service cleanly instead of killing children individually"
+        )
+    elif transient_zombies:
+        details.append(
+            f"Zombie processes: {len(transient_zombies)} transient (<={_ZOMBIE_GRACE_SECONDS}s); not alerting yet"
+        )
     else:
         details.append("Processes: no zombies")
 
-    # Package manager locks — WARN/CRIT
-    lock_issues = _check_pkg_manager_locks()
+    lock_issues, lock_remediation = _check_pkg_manager_locks()
     for issue in lock_issues:
         details.append(issue)
         sev = "CRIT" if "stale" in issue.lower() else "WARN"
         status = escalate(status, sev)
-        if "stale" in issue.lower():
-            remediation = remediation or "Remove stale lock files then re-run package manager"
+    remediation_parts.extend(lock_remediation)
 
-    # Listening ports summary (informational)
     sockets = _check_listening_ports()
     if sockets:
-        details.append(f"Listening sockets: {len(sockets)} (use --verbose to list)")
+        details.append(f"Listening sockets: {len(sockets)}")
     else:
         details.append("Listening sockets: unable to enumerate (ss/netstat not found)")
 
     if status == "OK":
-        msg = (f"No failed units, no zombies"
-               + (f", {len(sockets)} listening sockets" if sockets else ""))
+        msg = f"No failed units, no stale zombies, {len(sockets)} listening sockets" if sockets else "No failed units or stale zombies"
     else:
         parts = []
         if failed:
             parts.append(f"{len(failed)} failed unit(s)")
-        if zombie_count:
-            parts.append(f"{zombie_count} zombie(s)")
+        if stale_zombies:
+            parts.append(f"{len(stale_zombies)} stale zombie(s)")
+        elif total_zombies:
+            parts.append(f"{total_zombies} transient zombie(s)")
         if lock_issues:
-            parts.append(f"{len(lock_issues)} pkg lock(s)")
+            parts.append(f"{len(lock_issues)} pkg lock issue(s)")
         msg = ", ".join(parts)
+
+    remediation = "\n".join(dict.fromkeys(remediation_parts)) if status != "OK" and remediation_parts else None
 
     return Result(
         name="services",
         status=status,
         message=msg,
         details=details,
-        remediation=remediation if status != "OK" else None,
+        remediation=remediation,
     )
