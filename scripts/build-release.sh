@@ -150,7 +150,8 @@ install -m 0755 ${PKG_NAME}.sh %{buildroot}%{_bindir}/${PKG_NAME}
 %license LICENSE
 %doc README.md
 %{_bindir}/${PKG_NAME}
-%{python3_sitelib}/whatbroke
+/usr/lib/python3*/site-packages/whatbroke
+/usr/lib/python3*/site-packages/whatbroke/*
 
 %changelog
 * $(LC_ALL=C date '+%a %b %d %Y') Emerson <emerson@example.com> - ${VERSION}-1
