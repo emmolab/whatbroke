@@ -16,25 +16,37 @@ class FirewallTests(unittest.TestCase):
         self.assertEqual(result.message, "Firewall active")
         self.assertIn("ufw: active", result.details)
 
+    @patch("whatbroke.checks.firewall.os.geteuid", return_value=0)
     @patch("whatbroke.checks.firewall._service_active", return_value=True)
     @patch("whatbroke.checks.firewall._run", return_value=(1, "", ""))
     @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/sbin/ufw")
-    def test_probe_ufw_falls_back_to_service_state_when_status_command_fails(self, *_mocks):
+    def test_probe_ufw_falls_back_to_service_state_when_status_command_fails_as_root(self, *_mocks):
         active, detail = firewall._probe_ufw()
 
         self.assertTrue(active)
         self.assertEqual(detail, "ufw: active (service running; status command unavailable)")
 
-    @patch("whatbroke.checks.firewall.pathlib.Path.read_text", return_value="")
-    @patch("whatbroke.checks.firewall.pathlib.Path.exists", return_value=False)
+    @patch("whatbroke.checks.firewall.os.geteuid", return_value=1000)
+    @patch("whatbroke.checks.firewall._ufw_enabled_in_config", return_value=True)
     @patch("whatbroke.checks.firewall._service_active", return_value=False)
-    @patch("whatbroke.checks.firewall._run", return_value=(1, "", ""))
+    @patch("whatbroke.checks.firewall._run", return_value=(1, "", "ERROR: You need to be root to run this script"))
     @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/sbin/ufw")
-    def test_probe_ufw_reports_unknown_when_status_and_service_checks_fail(self, *_mocks):
+    def test_probe_ufw_reports_enabled_but_unconfirmed_when_unprivileged(self, *_mocks):
         active, detail = firewall._probe_ufw()
 
         self.assertIsNone(active)
-        self.assertEqual(detail, "")
+        self.assertEqual(detail, "ufw: installed/enabled (run with sudo to confirm live status)")
+
+    @patch("whatbroke.checks.firewall.os.geteuid", return_value=0)
+    @patch("whatbroke.checks.firewall._ufw_enabled_in_config", return_value=False)
+    @patch("whatbroke.checks.firewall._service_active", return_value=False)
+    @patch("whatbroke.checks.firewall._run", return_value=(1, "", ""))
+    @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/sbin/ufw")
+    def test_probe_ufw_reports_inactive_when_root_can_not_confirm_any_signal(self, *_mocks):
+        active, detail = firewall._probe_ufw()
+
+        self.assertFalse(active)
+        self.assertEqual(detail, "ufw: inactive")
 
 
 if __name__ == "__main__":

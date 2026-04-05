@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from whatbroke.checks import services
 
@@ -36,6 +37,23 @@ class ServicesZombieTests(unittest.TestCase):
         self.assertEqual(summary["parent_counts"][10], 1)
         self.assertEqual(summary["commands"]["gunicorn"], 2)
         self.assertEqual(summary["oldest"][0]["pid"], 202)
+
+    @patch("whatbroke.checks.services._check_failed_systemd_services", return_value=[])
+    @patch("whatbroke.checks.services._check_zombie_processes", return_value={"all": [], "stale": [], "transient": [], "parent_counts": {}, "commands": {}, "oldest": []})
+    @patch("whatbroke.checks.services._check_pkg_manager_locks", return_value=([], ["Ignoring idle apt lock file: /var/lib/dpkg/lock-frontend"], []))
+    @patch("whatbroke.checks.services._check_listening_ports", return_value=[])
+    def test_idle_apt_lock_file_is_not_alerted(self, *_mocks):
+        result = services.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertIn("Ignoring idle apt lock file", " ".join(result.details))
+
+    @patch("whatbroke.checks.services._file_has_live_holder", return_value=True)
+    def test_live_lock_holder_is_reported(self, *_mocks):
+        issues, notes, remediation = services._check_pkg_manager_locks()
+
+        self.assertTrue(any("transaction in progress" in issue for issue in issues))
+        self.assertTrue(any("Wait for the active" in item for item in remediation))
 
 
 if __name__ == "__main__":

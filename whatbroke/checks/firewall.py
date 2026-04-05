@@ -1,3 +1,4 @@
+import os
 import pathlib
 import shutil
 import subprocess
@@ -21,7 +22,15 @@ def _service_active(name: str) -> bool:
 # ── Backend probes ────────────────────────────────────────────────────────────
 
 def _needs_root(stderr: str) -> bool:
-    return any(kw in stderr.lower() for kw in ("permitted", "permission denied", "root"))
+    return any(kw in stderr.lower() for kw in ("permitted", "permission denied", "must be root", "you need to be root"))
+
+
+def _ufw_enabled_in_config() -> bool:
+    try:
+        conf = pathlib.Path("/etc/ufw/ufw.conf")
+        return conf.exists() and "enabled=yes" in conf.read_text().lower()
+    except OSError:
+        return False
 
 
 def _probe_nftables():
@@ -58,33 +67,44 @@ def _probe_iptables():
 
 
 def _probe_ufw():
-    """Return (active: bool, detail: str) or None if ufw not present."""
+    """Return (active: bool | None, detail: str)."""
     if not shutil.which("ufw"):
         return None, ""
 
-    rc, out, err = _run(["ufw", "status"])
-    if rc == 0:
-        first = out.splitlines()[0] if out.strip() else ""
-        active = "active" in first.lower() and "inactive" not in first.lower()
-        return active, f"ufw: {'active' if active else 'inactive'}"
+    # UFW prints a stable first line: "Status: active" / "Status: inactive".
+    # Try a couple of variants because some hosts behave differently under sudo.
+    for cmd in (["ufw", "status"], ["ufw", "status", "verbose"]):
+        rc, out, err = _run(cmd)
+        first = out.splitlines()[0].strip() if out.strip() else ""
+        if rc == 0 and first:
+            first_l = first.lower()
+            if "status:" in first_l:
+                if "inactive" in first_l:
+                    return False, "ufw: inactive"
+                if "active" in first_l:
+                    return True, "ufw: active"
+            if "inactive" in first_l:
+                return False, "ufw: inactive"
+            if "active" in first_l:
+                return True, "ufw: active"
+        if _needs_root(f"{out}\n{err}"):
+            break
 
-    combined = f"{out}\n{err}".lower()
-    if _needs_root(combined):
-        return True, "ufw: installed (requires root to read status)"
+    service_running = _service_active("ufw")
+    enabled_in_config = _ufw_enabled_in_config()
+    running_as_root = getattr(os, "geteuid", lambda: 1)() == 0
 
-    # Some hosts return a failing status command even when UFW is enabled/running.
-    # Fall back to service/config signals so active UFW is not missed.
-    if _service_active("ufw"):
-        return True, "ufw: active (service running; status command unavailable)"
+    if service_running or enabled_in_config:
+        if running_as_root:
+            if service_running:
+                return True, "ufw: active (service running; status command unavailable)"
+            return True, "ufw: enabled in /etc/ufw/ufw.conf"
+        return None, "ufw: installed/enabled (run with sudo to confirm live status)"
 
-    try:
-        conf = pathlib.Path("/etc/ufw/ufw.conf")
-        if conf.exists() and "enabled=yes" in conf.read_text().lower():
-            return True, "ufw: active (enabled in /etc/ufw/ufw.conf)"
-    except OSError:
-        pass
+    if not running_as_root:
+        return None, "ufw: installed (run with sudo to inspect status)"
 
-    return None, ""
+    return False, "ufw: inactive"
 
 
 def _probe_firewalld():

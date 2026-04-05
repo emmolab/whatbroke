@@ -347,6 +347,12 @@ curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh |
 - output should help an on-call Linux admin decide what to inspect next
 
 Recent behavior changes in `0.3.0`:
+- the runtime banner is now plain and terminal-safe instead of relying on wide ASCII art
+- UFW detection behaves more sensibly under both `sudo` and unprivileged runs, distinguishing confirmed active/inactive state from "installed, but needs sudo to confirm"
+- package-manager lock checks now focus on active transactions and ignore harmless leftover lock files / stale pid files
+- repeated UFW BLOCK / deny spam is suppressed from log alerting so routine firewall noise does not dominate output
+- AppArmor "enabled but 0 profiles in enforce mode" is now contextual instead of an automatic warning
+- sysctl output focuses on higher-signal server hardening gaps, while more environment-dependent tunables are reported as context
 - zombie detection now looks for long-lived zombies using `ps` fields like PID, PPID, STAT, ELAPSED, and COMMAND
 - small non-security package backlogs are informational instead of warnings
 - ordinary low-volume journal/kernel noise is de-emphasised; repeated storms and severe events still alert loudly
