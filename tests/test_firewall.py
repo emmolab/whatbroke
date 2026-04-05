@@ -48,6 +48,18 @@ class FirewallTests(unittest.TestCase):
         self.assertFalse(active)
         self.assertEqual(detail, "ufw: inactive")
 
+    @patch("whatbroke.checks.firewall._probe_nftables", return_value=(False, None, ""))
+    @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(None, ""))
+    @patch("whatbroke.checks.firewall._probe_iptables", return_value=(False, 0, ""))
+    @patch("whatbroke.checks.firewall._probe_ufw", return_value=(None, "ufw: installed/enabled (run with sudo to confirm live status)"))
+    def test_check_reports_unconfirmed_firewall_context_when_ufw_needs_privilege(self, *_mocks):
+        result = firewall.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertEqual(result.message, "Firewall present but live status could not be confirmed without privilege")
+        self.assertIn("ufw: installed/enabled (run with sudo to confirm live status)", result.details)
+        self.assertNotIn("No active firewall rules detected", result.details)
+
 
 if __name__ == "__main__":
     unittest.main()
