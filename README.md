@@ -163,7 +163,7 @@ The overall worst status is used as the **exit code** (0=OK, 1=WARN, 2=BROKE, 3=
 ```bash
 # /etc/cron.d/whatbroke
 # Runs every 15 minutes; emails only when something new breaks
-*/15 * * * * root whatbroke --compact --diff | mail -s "whatbroke: new issues on $(hostname)" ops@example.com
+*/15 * * * * root whatbroke --compact --diff | mail -s "whatbroke: new issues on $(hostname)" root@localhost
 ```
 
 Because `--diff` outputs nothing when there are no new issues, this only sends mail when a previously-passing check starts failing.
