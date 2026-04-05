@@ -130,6 +130,7 @@ def check() -> Result:
 
     found_any = False
     firewall_active = False
+    firewall_unconfirmed = False
 
     # nftables
     nft_active, nft_rules, nft_detail = _probe_nftables()
@@ -145,6 +146,8 @@ def check() -> Result:
         found_any = True
         if ufw_active:
             firewall_active = True
+        elif ufw_active is None:
+            firewall_unconfirmed = True
         if ufw_active is False:  # explicitly inactive (not just unknown)
             issues.append(f"{ufw_detail}")
         else:
@@ -183,7 +186,10 @@ def check() -> Result:
 
     if not firewall_active:
         status = escalate(status, "WARN")
-        issues.insert(0, "No active firewall rules detected")
+        if firewall_unconfirmed:
+            issues.insert(0, "Firewall present but live status could not be confirmed without privilege")
+        else:
+            issues.insert(0, "No active firewall rules detected")
 
     all_details = issues + details
 
