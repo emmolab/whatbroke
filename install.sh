@@ -11,9 +11,9 @@ usage() {
 whatbroke install/upgrade script
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh
-  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --version v0.3.0
-  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --repo owner/repo
+  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.0
+  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --repo owner/repo
 
 Options:
   --version TAG   Install a specific tag instead of the latest release
@@ -33,6 +33,57 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+read_os_release() {
+  if [[ -r /etc/os-release ]]; then
+    . /etc/os-release
+    echo "${ID:-}" "${ID_LIKE:-}"
+  else
+    echo "" ""
+  fi
+}
+
+detect_package_kind() {
+  local id like tokens
+  read -r id like < <(read_os_release)
+  tokens=" $id $like "
+
+  if [[ "$tokens" == *" rhel "* || "$tokens" == *" fedora "* || "$tokens" == *" centos "* || "$tokens" == *" rocky "* || "$tokens" == *" alma "* || "$tokens" == *" suse "* || "$tokens" == *" opensuse "* ]]; then
+    if command -v rpm >/dev/null 2>&1; then
+      echo rpm
+      return
+    fi
+  fi
+
+  if [[ "$tokens" == *" debian "* || "$tokens" == *" ubuntu "* ]]; then
+    if command -v dpkg >/dev/null 2>&1; then
+      echo deb
+      return
+    fi
+  fi
+
+  if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1 || command -v zypper >/dev/null 2>&1; then
+    echo rpm
+    return
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    echo deb
+    return
+  fi
+
+  if command -v rpm >/dev/null 2>&1; then
+    echo rpm
+    return
+  fi
+
+  if command -v dpkg >/dev/null 2>&1; then
+    echo deb
+    return
+  fi
+
+  return 1
+}
 
 VERSION="latest"
 DRY_RUN=0
@@ -90,20 +141,16 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   fail 'This installer currently supports Linux only'
 fi
 
-PACKAGE_KIND=""
+PACKAGE_KIND="$(detect_package_kind)" || fail 'Unsupported Linux distribution: could not determine deb vs rpm packaging'
 PKG_EXT=""
 INSTALL_CMD=()
 
-if command -v dpkg >/dev/null 2>&1 || command -v apt-get >/dev/null 2>&1; then
-  PACKAGE_KIND="deb"
+if [[ "$PACKAGE_KIND" == "deb" ]]; then
   PKG_EXT=".deb"
   INSTALL_CMD=(dpkg -i)
-elif command -v rpm >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1 || command -v zypper >/dev/null 2>&1; then
-  PACKAGE_KIND="rpm"
+else
   PKG_EXT=".rpm"
   INSTALL_CMD=(rpm -Uvh)
-else
-  fail 'Unsupported Linux distribution: expected dpkg/apt or rpm/dnf/yum/zypper'
 fi
 
 release_endpoint="$API_BASE/releases/latest"

@@ -22,6 +22,8 @@ Linux system diagnostics tool for sysadmins. Runs 12 health checks in parallel, 
 curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash
 ```
 
+The installer detects Debian/RPM family hosts using `/etc/os-release` and the active package manager, so mixed-tool systems do not get misclassified just because `dpkg` happens to exist.
+
 **Uninstall:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/uninstall.sh | bash
