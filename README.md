@@ -19,12 +19,12 @@ Linux system diagnostics tool for sysadmins. Runs 12 health checks in parallel, 
 
 **Install or upgrade from the latest GitHub Release (recommended):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash
 ```
 
 **Uninstall:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/uninstall.sh | sh
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/uninstall.sh | bash
 ```
 
 The installer:
@@ -38,7 +38,7 @@ The uninstaller:
 
 **Install a specific release:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --version v0.3.0
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.0
 ```
 
 **Build packages locally:**
@@ -301,7 +301,7 @@ That means a release page ends up with:
 The repo-root `install.sh` is designed to be hosted directly from GitHub and used as either a first install or an upgrade path.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash
 ```
 
 It will:
@@ -314,10 +314,10 @@ Useful flags:
 
 ```bash
 # Pin a specific tag
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --version v0.3.0
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.0
 
 # Preview the chosen asset URL only
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | sh -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --dry-run
 ```
 
 ---
