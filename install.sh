@@ -70,17 +70,17 @@ need_cmd python3
 
 if command -v curl >/dev/null 2>&1; then
   fetch() {
-    curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer ${GITHUB_TOKEN}"} "$1"
+    curl -fsSL "$1"
   }
   download() {
-    curl -fL ${GITHUB_TOKEN:+-H "Authorization: Bearer ${GITHUB_TOKEN}"} -o "$2" "$1"
+    curl -fL -o "$2" "$1"
   }
 elif command -v wget >/dev/null 2>&1; then
   fetch() {
-    wget -qO- ${GITHUB_TOKEN:+--header="Authorization: Bearer ${GITHUB_TOKEN}"} "$1"
+    wget -qO- "$1"
   }
   download() {
-    wget -qO "$2" ${GITHUB_TOKEN:+--header="Authorization: Bearer ${GITHUB_TOKEN}"} "$1"
+    wget -qO "$2" "$1"
   }
 else
   fail 'curl or wget is required'
