@@ -83,35 +83,58 @@ def _check_zombie_processes() -> dict:
         return {"all": [], "stale": [], "transient": [], "parent_counts": Counter(), "commands": Counter(), "oldest": []}
 
 
-def _check_pkg_manager_locks() -> tuple[list[str], list[str]]:
-    """Detect stale or active package manager lock files."""
+def _file_has_live_holder(path: str) -> bool:
+    for tool in ("fuser", "lsof"):
+        if not shutil.which(tool):
+            continue
+        try:
+            cmd = [tool, path] if tool == "fuser" else [tool, path]
+            proc = _run(cmd, timeout=5)
+            if proc.returncode == 0 and (proc.stdout.strip() or proc.stderr.strip()):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _pid_is_running(pid: str) -> bool:
+    return pid.isdigit() and os.path.exists(f"/proc/{pid}")
+
+
+def _check_pkg_manager_locks() -> tuple[list[str], list[str], list[str]]:
+    """Detect active package manager locks, while ignoring harmless leftover lock files."""
     issues: list[str] = []
+    notes: list[str] = []
     remediation_notes: list[str] = []
     lock_files = [
-        ("/var/lib/dpkg/lock-frontend", "apt"),
-        ("/var/lib/dpkg/lock", "apt"),
-        ("/var/cache/apt/archives/lock", "apt"),
-        ("/var/lib/rpm/.rpm.lock", "rpm"),
-        ("/var/lib/pacman/db.lck", "pacman"),
-        ("/var/run/yum.pid", "yum"),
-        ("/var/run/dnf.pid", "dnf"),
+        ("/var/lib/dpkg/lock-frontend", "apt", "file"),
+        ("/var/lib/dpkg/lock", "apt", "file"),
+        ("/var/cache/apt/archives/lock", "apt", "file"),
+        ("/var/lib/rpm/.rpm.lock", "rpm", "file"),
+        ("/var/lib/pacman/db.lck", "pacman", "file"),
+        ("/var/run/yum.pid", "yum", "pid"),
+        ("/var/run/dnf.pid", "dnf", "pid"),
     ]
-    for lock_path, manager in lock_files:
+    for lock_path, manager, lock_type in lock_files:
         if not os.path.exists(lock_path):
             continue
         try:
-            import fcntl
-            with open(lock_path, "r") as fh:
-                try:
-                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    fcntl.flock(fh, fcntl.LOCK_UN)
-                    issues.append(f"Stale {manager} lock: {lock_path} (holder no longer running)")
-                    remediation_notes.append(f"Verify no {manager} transaction is active, then remove {lock_path}")
-                except (IOError, OSError):
-                    issues.append(f"{manager} transaction in progress: {lock_path} is locked")
+            if lock_type == "pid":
+                pid = open(lock_path).read().strip()
+                if _pid_is_running(pid):
+                    issues.append(f"{manager} transaction in progress: pid {pid} ({lock_path})")
+                else:
+                    notes.append(f"Ignoring stale {manager} pid file: {lock_path}")
+                continue
+
+            if _file_has_live_holder(lock_path):
+                issues.append(f"{manager} transaction in progress: {lock_path} is actively held")
+                remediation_notes.append(f"Wait for the active {manager} transaction to finish before intervening")
+            else:
+                notes.append(f"Ignoring idle {manager} lock file: {lock_path}")
         except Exception:
-            issues.append(f"{manager} lock file present: {lock_path}")
-    return issues, remediation_notes
+            notes.append(f"Ignoring unreadable {manager} lock indicator: {lock_path}")
+    return issues, notes, remediation_notes
 
 
 def _check_listening_ports() -> list:
@@ -193,11 +216,11 @@ def check() -> Result:
     else:
         details.append("Processes: no zombies")
 
-    lock_issues, lock_remediation = _check_pkg_manager_locks()
+    lock_issues, lock_notes, lock_remediation = _check_pkg_manager_locks()
+    details.extend(lock_notes)
     for issue in lock_issues:
         details.append(issue)
-        sev = "CRIT" if "stale" in issue.lower() else "WARN"
-        status = escalate(status, sev)
+        status = escalate(status, "WARN")
     remediation_parts.extend(lock_remediation)
 
     sockets = _check_listening_ports()
@@ -217,7 +240,7 @@ def check() -> Result:
         elif total_zombies:
             parts.append(f"{total_zombies} transient zombie(s)")
         if lock_issues:
-            parts.append(f"{len(lock_issues)} pkg lock issue(s)")
+            parts.append(f"{len(lock_issues)} active pkg transaction(s)")
         msg = ", ".join(parts)
 
     remediation = "\n".join(dict.fromkeys(remediation_parts)) if status != "OK" and remediation_parts else None

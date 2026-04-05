@@ -147,9 +147,10 @@ def _check_expiring_certs() -> list:
     return issues
 
 
-def _check_selinux_apparmor() -> list:
-    """Return list of MAC (SELinux/AppArmor) issue strings."""
+def _check_selinux_apparmor() -> tuple[list[str], list[str]]:
+    """Return (issues, contextual notes) for SELinux/AppArmor state."""
     issues = []
+    notes = []
     if shutil.which("getenforce"):
         try:
             proc = _run(["getenforce"], timeout=5)
@@ -176,10 +177,10 @@ def _check_selinux_apparmor() -> list:
                     if isinstance(enforced, dict):
                         enforced = len(enforced)
                     if enforced == 0:
-                        issues.append("AppArmor: loaded but 0 profiles in enforce mode")
+                        notes.append("AppArmor: enabled, but no profiles are currently in enforce mode")
         except Exception:
             pass
-    return issues
+    return issues, notes
 
 
 def _check_entropy() -> tuple:
@@ -269,10 +270,12 @@ def check() -> Result:
     if not cert_issues:
         details.append("Certificates: none expiring within 30 days")
 
-    mac_issues = _check_selinux_apparmor()
+    mac_issues, mac_notes = _check_selinux_apparmor()
     for issue in mac_issues:
         details.append(issue)
         status = escalate(status, "WARN")
+    for note in mac_notes:
+        details.append(note)
     if mac_issues:
         remediation_parts.append("Review SELinux/AppArmor policy mode against your host hardening baseline")
 

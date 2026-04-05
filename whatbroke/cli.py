@@ -40,14 +40,8 @@ def _disable_colors() -> None:
 
 
 _BANNER = (
-    " __          ___           _   ____            _\n"
-    " \\ \\        / / |         | | |  _ \\          | |\n"
-    "  \\ \\  /\\  / /| |__   __ _| |_| |_) |_ __ ___ | | _____\n"
-    "   \\ \\/  \\/ / | '_ \\ / _` | __|  _ <| '__/ _ \\| |/ / _ \\\n"
-    "    \\  /\\  /  | | | | (_| | |_| |_) | | | (_) |   <  __/\n"
-    "     \\/  \\/   |_| |_|\\__,_|\\__|____/|_|  \\___/|_|\\_\\___|\n"
-    "\n"
-    " Find what's broken. Fix what matters.\n"
+    "WhatBroke\n"
+    "Find what's broken. Fix what matters.\n"
 )
 
 # ── State file (tracks first-seen timestamps for issues) ─────────────────────

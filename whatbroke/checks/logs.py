@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from collections import Counter
 
@@ -7,6 +8,10 @@ from ..result import Result, escalate
 _JOURNAL_ERROR_WARN_THRESHOLD = 20
 _KERNEL_WARN_THRESHOLD = 10
 _LARGE_LOG_WARN_BYTES = 5 * 1024 * 1024 * 1024
+_SUPPRESSED_PATTERNS = (
+    re.compile(r"\bufw\b.*\bblock\b", re.IGNORECASE),
+    re.compile(r"\bfinal\s+reject\b", re.IGNORECASE),
+)
 
 
 def _run(cmd, timeout=15):
@@ -20,6 +25,16 @@ def _extract_systemd_unit(line: str) -> str | None:
         if ".service" in token or ".socket" in token or ".timer" in token:
             return token
     return None
+
+
+def _partition_noise(lines: list[str]) -> tuple[list[str], list[str]]:
+    kept, suppressed = [], []
+    for line in lines:
+        if any(pattern.search(line) for pattern in _SUPPRESSED_PATTERNS):
+            suppressed.append(line)
+        else:
+            kept.append(line)
+    return kept, suppressed
 
 
 def _check_journal_critical() -> tuple:
@@ -155,13 +170,14 @@ def check() -> Result:
     remediation_parts = []
 
     critical, errors = _check_journal_critical()
+    errors, suppressed_journal = _partition_noise(errors)
     if critical:
         details.append(f"Journal critical/alert/emerg: {len(critical)} entries in last 24h")
         details.extend(critical[:5])
         status = escalate(status, "CRIT")
         remediation_parts.append("Inspect critical journal entries with: journalctl -p 0..2 --since '24 hours ago'")
     elif len(errors) >= _JOURNAL_ERROR_WARN_THRESHOLD:
-        details.append(f"Journal err: {len(errors)} entries in last 24h")
+        details.append(f"Journal err: {len(errors)} actionable entries in last 24h")
         details.extend(errors[:3])
         units = Counter(unit for unit in (_extract_systemd_unit(line) for line in errors) if unit)
         if units:
@@ -169,9 +185,11 @@ def check() -> Result:
         status = escalate(status, "WARN")
         remediation_parts.append("Review recurring journal errors: journalctl -p 3 --since '24 hours ago'")
     elif errors:
-        details.append(f"Journal err: {len(errors)} entries in last 24h (below alert threshold)")
+        details.append(f"Journal err: {len(errors)} actionable entries in last 24h (below alert threshold)")
     else:
-        details.append("Journal: no critical/error entries in last 24h")
+        details.append("Journal: no actionable critical/error entries in last 24h")
+    if suppressed_journal:
+        details.append(f"Journal noise suppressed: {len(suppressed_journal)} firewall deny/block line(s)")
 
     oom_events = _check_oom_events()
     if oom_events:
@@ -181,6 +199,7 @@ def check() -> Result:
         remediation_parts.append("Investigate memory pressure: free -h, ps aux --sort=-%mem")
 
     kernel_issues = _check_kernel_messages()
+    kernel_issues, suppressed_kernel = _partition_noise(kernel_issues)
     if kernel_issues:
         severe_keywords = ("panic", "oops", "call trace", "filesystem corruption", "i/o error")
         severe_kernel = [line for line in kernel_issues if any(keyword in line.lower() for keyword in severe_keywords)]
@@ -190,14 +209,16 @@ def check() -> Result:
             status = escalate(status, "CRIT")
             remediation_parts.append("Inspect kernel events with: journalctl -k -p 0..4 --since '24 hours ago'")
         elif len(kernel_issues) >= _KERNEL_WARN_THRESHOLD:
-            details.append(f"Kernel warnings/errors: {len(kernel_issues)} in last 24h")
+            details.append(f"Kernel warnings/errors: {len(kernel_issues)} actionable entries in last 24h")
             details.extend(kernel_issues[:5])
             status = escalate(status, "WARN")
             remediation_parts.append("Review repeated kernel warnings with: journalctl -k -p 4 --since '24 hours ago'")
         else:
-            details.append(f"Kernel warnings/errors: {len(kernel_issues)} in last 24h (below alert threshold)")
+            details.append(f"Kernel warnings/errors: {len(kernel_issues)} actionable entries in last 24h (below alert threshold)")
     else:
-        details.append("Kernel: no warnings/errors detected")
+        details.append("Kernel: no actionable warnings/errors detected")
+    if suppressed_kernel:
+        details.append(f"Kernel noise suppressed: {len(suppressed_kernel)} firewall deny/block line(s)")
 
     app_errors = _check_application_logs()
     if app_errors:

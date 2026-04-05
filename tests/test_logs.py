@@ -27,6 +27,18 @@ class LogsThresholdTests(unittest.TestCase):
         self.assertEqual(result.status, "WARN")
         self.assertTrue(any("Top noisy units:" in line for line in result.details))
 
+    @patch("whatbroke.checks.logs._check_journal_critical", return_value=([], ["kernel: [UFW BLOCK] IN=eth0"] * 50))
+    @patch("whatbroke.checks.logs._check_oom_events", return_value=[])
+    @patch("whatbroke.checks.logs._check_kernel_messages", return_value=["kernel: [UFW BLOCK] IN=eth0"] * 50)
+    @patch("whatbroke.checks.logs._check_application_logs", return_value=[])
+    @patch("whatbroke.checks.logs._check_large_logs", return_value=[])
+    def test_ufw_block_spam_is_suppressed_not_alerted(self, *_mocks):
+        result = logs.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertTrue(any("noise suppressed" in line.lower() for line in result.details))
+        self.assertFalse(any("50 journal errors" in line for line in result.details))
+
 
 if __name__ == "__main__":
     unittest.main()
