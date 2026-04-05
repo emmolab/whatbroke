@@ -1,3 +1,4 @@
+import pathlib
 import shutil
 import subprocess
 
@@ -60,14 +61,30 @@ def _probe_ufw():
     """Return (active: bool, detail: str) or None if ufw not present."""
     if not shutil.which("ufw"):
         return None, ""
+
     rc, out, err = _run(["ufw", "status"])
-    if rc != 0:
-        if _needs_root(err + out):
-            return True, "ufw: installed (requires root to read status)"
-        return None, ""
-    first = out.splitlines()[0] if out.strip() else ""
-    active = "active" in first.lower() and "inactive" not in first.lower()
-    return active, f"ufw: {'active' if active else 'inactive'}"
+    if rc == 0:
+        first = out.splitlines()[0] if out.strip() else ""
+        active = "active" in first.lower() and "inactive" not in first.lower()
+        return active, f"ufw: {'active' if active else 'inactive'}"
+
+    combined = f"{out}\n{err}".lower()
+    if _needs_root(combined):
+        return True, "ufw: installed (requires root to read status)"
+
+    # Some hosts return a failing status command even when UFW is enabled/running.
+    # Fall back to service/config signals so active UFW is not missed.
+    if _service_active("ufw"):
+        return True, "ufw: active (service running; status command unavailable)"
+
+    try:
+        conf = pathlib.Path("/etc/ufw/ufw.conf")
+        if conf.exists() and "enabled=yes" in conf.read_text().lower():
+            return True, "ufw: active (enabled in /etc/ufw/ufw.conf)"
+    except OSError:
+        pass
+
+    return None, ""
 
 
 def _probe_firewalld():
