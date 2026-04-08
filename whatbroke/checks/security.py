@@ -1,7 +1,9 @@
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ..result import Result, escalate
 
@@ -9,6 +11,8 @@ _FAILED_LOGIN_WARN = 20
 _FAILED_LOGIN_CRIT = 100
 _PENDING_UPDATE_WARN = 25
 _PENDING_UPDATE_BROKE = 100
+_CERT_WARN_DAYS = 30
+_CERT_SCAN_LIMIT = 40
 
 
 def _run(cmd, timeout=10):
@@ -87,19 +91,36 @@ def _check_ssh_config() -> list:
     return issues
 
 
-def _check_expiring_certs() -> list:
-    """Return list of (path, days_remaining) for expiring/expired certs."""
-    issues = []
-    now = datetime.now(timezone.utc)
-    cert_dirs = (
-        "/etc/ssl/certs",
-        "/etc/pki/tls/certs",
-        "/etc/letsencrypt/live",
-    )
-    if not shutil.which("openssl"):
-        return issues
+def _parse_cert_enddate(cert: str):
+    c = _run(["openssl", "x509", "-in", cert, "-noout", "-enddate"], timeout=5)
+    if c.returncode != 0 or "=" not in c.stdout:
+        return None
+    date_str = c.stdout.split("=", 1)[1].strip()
+    exp = datetime.strptime(date_str, "%b %d %H:%M:%S %Y %Z")
+    return exp.replace(tzinfo=timezone.utc)
 
-    for base in cert_dirs:
+
+def _certificate_search_roots() -> tuple[str, ...]:
+    return (
+        "/etc/letsencrypt/live",
+        "/etc/ssl/private",
+        "/etc/pki/tls/certs",
+        "/etc/pki/tls/private",
+        "/etc/nginx",
+        "/etc/apache2",
+        "/etc/httpd",
+        "/etc/haproxy",
+        "/etc/postfix",
+        "/etc/dovecot",
+        "/etc/caddy",
+        "/etc/traefik",
+    )
+
+
+def _iter_candidate_certificate_paths() -> list[str]:
+    seen = set()
+    candidates = []
+    for base in _certificate_search_roots():
         if not os.path.exists(base):
             continue
         try:
@@ -108,7 +129,7 @@ def _check_expiring_certs() -> list:
                     "find",
                     base,
                     "-maxdepth",
-                    "3",
+                    "4",
                     "-type",
                     "f",
                     "(",
@@ -117,34 +138,163 @@ def _check_expiring_certs() -> list:
                     "-o",
                     "-name",
                     "*.crt",
+                    "-o",
+                    "-name",
+                    "*.cer",
                     ")",
                 ],
                 timeout=10,
             )
-            for cert in proc.stdout.splitlines()[:20]:
-                cert = cert.strip()
+            if proc.returncode != 0:
+                continue
+            for raw in proc.stdout.splitlines():
+                cert = raw.strip()
                 if not cert:
                     continue
-                try:
-                    c = _run(
-                        ["openssl", "x509", "-in", cert, "-noout", "-enddate"],
-                        timeout=5,
-                    )
-                    if c.returncode != 0:
-                        continue
-                    date_str = c.stdout.split("=", 1)[1].strip()
-                    exp = datetime.strptime(date_str, "%b %d %H:%M:%S %Y %Z")
-                    exp = exp.replace(tzinfo=timezone.utc)
-                    days = (exp - now).days
-                    if days < 0:
-                        issues.append((cert, days))
-                    elif days <= 30:
-                        issues.append((cert, days))
-                except Exception:
-                    pass
+                name = os.path.basename(cert).lower()
+                if name in {"privkey.pem", "chain.pem"}:
+                    continue
+                real = os.path.realpath(cert)
+                if real in seen:
+                    continue
+                seen.add(real)
+                candidates.append(cert)
+                if len(candidates) >= _CERT_SCAN_LIMIT:
+                    return candidates
+        except Exception:
+            pass
+    return candidates
+
+
+def _check_expiring_certs() -> list:
+    """Return list of (path, days_remaining) for expiring/expired certs."""
+    issues = []
+    now = datetime.now(timezone.utc)
+    if not shutil.which("openssl"):
+        return issues
+
+    for cert in _iter_candidate_certificate_paths():
+        try:
+            exp = _parse_cert_enddate(cert)
+            if exp is None:
+                continue
+            days = (exp - now).days
+            if days < 0 or days <= _CERT_WARN_DAYS:
+                issues.append((cert, days))
         except Exception:
             pass
     return issues
+
+
+def _check_letsencrypt_state() -> dict:
+    """Return Let's Encrypt/Certbot context and actionable issues."""
+    state = {
+        "managed": 0,
+        "earliest_days": None,
+        "notes": [],
+        "issues": [],
+        "remediation": [],
+    }
+
+    live_dir = Path("/etc/letsencrypt/live")
+    renewal_dir = Path("/etc/letsencrypt/renewal")
+    renewal_confs = sorted(renewal_dir.glob("*.conf")) if renewal_dir.exists() else []
+    live_names = []
+    if live_dir.exists():
+        for entry in sorted(live_dir.iterdir()):
+            if entry.is_dir() and any((entry / name).exists() for name in ("cert.pem", "fullchain.pem")):
+                live_names.append(entry.name)
+    if live_names:
+        state["managed"] = len(live_names)
+
+    if not (live_names or renewal_confs or shutil.which("certbot")):
+        return state
+
+    now = datetime.now(timezone.utc)
+    earliest = None
+    for name in live_names:
+        cert_path = live_dir / name / "cert.pem"
+        if not cert_path.exists():
+            cert_path = live_dir / name / "fullchain.pem"
+        if not cert_path.exists():
+            continue
+        try:
+            exp = _parse_cert_enddate(str(cert_path))
+            if exp is None:
+                continue
+            days = (exp - now).days
+            earliest = days if earliest is None else min(earliest, days)
+        except Exception:
+            pass
+    state["earliest_days"] = earliest
+
+    if renewal_confs and not shutil.which("certbot"):
+        state["issues"].append(
+            f"Let's Encrypt: {len(renewal_confs)} renewal config(s) present but certbot is not installed"
+        )
+        state["remediation"].append("Install certbot or remove stale /etc/letsencrypt renewal configs")
+        return state
+
+    if shutil.which("certbot"):
+        try:
+            proc = _run(["certbot", "certificates"], timeout=20)
+            output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+            if proc.returncode != 0:
+                state["issues"].append("Let's Encrypt: certbot is installed but 'certbot certificates' failed")
+                first_error = next((line.strip() for line in output.splitlines() if line.strip()), None)
+                if first_error:
+                    state["notes"].append(f"  {first_error}")
+                state["remediation"].append("Run 'certbot certificates' manually and fix certbot/account state")
+            else:
+                cert_names = [line.split(":", 1)[1].strip() for line in output.splitlines() if line.strip().startswith("Certificate Name:")]
+                if cert_names:
+                    state["managed"] = max(state["managed"], len(cert_names))
+                valid_days = []
+                for line in output.splitlines():
+                    m = re.search(r"VALID:\s*(\d+)\s+days", line)
+                    if m:
+                        valid_days.append(int(m.group(1)))
+                if valid_days:
+                    parsed_earliest = min(valid_days)
+                    state["earliest_days"] = parsed_earliest if state["earliest_days"] is None else min(state["earliest_days"], parsed_earliest)
+        except Exception:
+            state["issues"].append("Let's Encrypt: unable to query certbot state")
+            state["remediation"].append("Run 'certbot certificates' manually to verify renewal health")
+
+    if renewal_confs and shutil.which("systemctl"):
+        timer_enabled = False
+        timer_active = False
+        try:
+            proc = _run(["systemctl", "is-enabled", "certbot.timer"], timeout=5)
+            timer_enabled = proc.returncode == 0 and proc.stdout.strip() == "enabled"
+        except Exception:
+            pass
+        try:
+            proc = _run(["systemctl", "is-active", "certbot.timer"], timeout=5)
+            timer_active = proc.returncode == 0 and proc.stdout.strip() == "active"
+        except Exception:
+            pass
+        if not (timer_enabled and timer_active):
+            state["issues"].append(
+                f"Let's Encrypt: certbot renewal timer is not fully active ({'enabled' if timer_enabled else 'disabled'}, {'active' if timer_active else 'inactive'})"
+            )
+            state["remediation"].append("Enable/start certbot.timer or provide an equivalent renewal job")
+
+    if live_names and renewal_confs and len(renewal_confs) < len(live_names):
+        state["issues"].append(
+            f"Let's Encrypt: {len(live_names)} live lineage(s) but only {len(renewal_confs)} renewal config(s)"
+        )
+        state["remediation"].append("Check for partial or stale /etc/letsencrypt state before the next renewal")
+
+    if state["managed"]:
+        if state["earliest_days"] is None:
+            state["notes"].append(f"Let's Encrypt: {state['managed']} managed lineage(s) detected")
+        else:
+            state["notes"].append(
+                f"Let's Encrypt: {state['managed']} managed lineage(s); earliest expiry in {state['earliest_days']}d"
+            )
+
+    return state
 
 
 def _check_selinux_apparmor() -> tuple[list[str], list[str]]:
@@ -268,7 +418,14 @@ def check() -> Result:
             status = escalate(status, "WARN")
             remediation_parts.append("Renew or replace certificates before expiry")
     if not cert_issues:
-        details.append("Certificates: none expiring within 30 days")
+        details.append(f"Certificates: none expiring within {_CERT_WARN_DAYS} days")
+
+    le_state = _check_letsencrypt_state()
+    details.extend(le_state["notes"])
+    for issue in le_state["issues"]:
+        details.append(issue)
+        status = escalate(status, "WARN")
+    remediation_parts.extend(le_state["remediation"])
 
     mac_issues, mac_notes = _check_selinux_apparmor()
     for issue in mac_issues:
@@ -303,6 +460,8 @@ def check() -> Result:
             parts.append("SSH policy to review")
         if cert_issues:
             parts.append(f"{len(cert_issues)} cert issue(s)")
+        if le_state["issues"]:
+            parts.append("Let's Encrypt state to review")
         if mac_issues:
             parts.append("MAC policy to review")
         msg = "; ".join(parts) if parts else "security issues detected"
