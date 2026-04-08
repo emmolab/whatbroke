@@ -40,7 +40,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: whatbroke-release-artifacts
-          path: dist/*
+          path: |
+            dist/*.tar.gz
+            dist/*.whl
+            dist/*.deb
+            dist/*.rpm
 
       - name: Resolve target tag
         id: target
@@ -65,4 +69,10 @@ jobs:
       - name: Upload assets to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ steps.target.outputs.tag }}" dist/* --clobber
+        run: |
+          gh release upload "${{ steps.target.outputs.tag }}" \
+            dist/*.tar.gz \
+            dist/*.whl \
+            dist/*.deb \
+            dist/*.rpm \
+            --clobber

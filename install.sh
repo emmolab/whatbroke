@@ -12,7 +12,7 @@ whatbroke install/upgrade script
 
 Usage:
   curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.0
+  curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.1
   curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --repo owner/repo
 
 Options:
