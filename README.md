@@ -75,7 +75,7 @@ Results are sorted worst-first (CRIT → WARN → OK).
 | `services` | Failed systemd units, stale zombie processes, package manager lock files |
 | `logs` | Critical journal entries, repeated error storms, kernel/OOM events |
 | `networking` | Internet/DNS reachability, NTP sync, NIC errors and drops |
-| `security` | Failed SSH logins, update backlog context, SSH policy, cert expiry, SELinux/AppArmor, entropy pool |
+| `security` | Failed SSH logins, update backlog context, SSH policy, locally-managed cert expiry, Let's Encrypt/certbot renewal state, SELinux/AppArmor, entropy pool |
 | `sysctl` | Kernel hardening parameters (ASLR, syncookies, ICMP redirects, rp_filter, kptr_restrict, etc.) |
 | `firewall` | nftables / iptables / ufw / firewalld active status |
 | `users` | Extra UID-0 accounts, empty passwords, `NOPASSWD:ALL` sudoers grants |
@@ -357,6 +357,8 @@ Recent behavior changes in `0.3.0`:
 - sysctl output focuses on higher-signal server hardening gaps, while more environment-dependent tunables are reported as context
 - zombie detection now looks for long-lived zombies using `ps` fields like PID, PPID, STAT, ELAPSED, and COMMAND
 - small non-security package backlogs are informational instead of warnings
+- security checks now focus certificate scanning on locally managed service certs instead of the whole CA trust store
+- Let's Encrypt/certbot state is surfaced more usefully: managed lineage count, earliest expiry context, broken certbot state, and disabled/inactive renewal timers
 - ordinary low-volume journal/kernel noise is de-emphasised; repeated storms and severe events still alert loudly
 - hardware thresholds are less jumpy on long-lived servers
 
