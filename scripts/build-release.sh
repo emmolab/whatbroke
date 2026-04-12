@@ -164,52 +164,6 @@ EOF
     ok "Built $(basename "$rpm")"
 }
 
-write_local_helpers() {
-    step "Writing local install/uninstall helpers"
-    cat > "$DIST_DIR/install.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEB="$(find "$SCRIPT_DIR" -maxdepth 1 -name 'whatbroke_*.deb' | head -1 || true)"
-RPM="$(find "$SCRIPT_DIR" -maxdepth 1 -name 'whatbroke-*.rpm' | head -1 || true)"
-
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  exec sudo "$0" "$@"
-fi
-
-if [[ -n "$DEB" ]] && command -v dpkg >/dev/null 2>&1; then
-  dpkg -i "$DEB"
-elif [[ -n "$RPM" ]] && command -v rpm >/dev/null 2>&1; then
-  rpm -Uvh "$RPM"
-else
-  echo "No compatible package found in $SCRIPT_DIR" >&2
-  exit 1
-fi
-EOF
-    chmod 0755 "$DIST_DIR/install.sh"
-
-    cat > "$DIST_DIR/uninstall.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  exec sudo "$0" "$@"
-fi
-
-if command -v dpkg >/dev/null 2>&1 && dpkg -s whatbroke >/dev/null 2>&1; then
-  exec dpkg --purge whatbroke
-fi
-
-if command -v rpm >/dev/null 2>&1 && rpm -q whatbroke >/dev/null 2>&1; then
-  exec rpm -e whatbroke
-fi
-
-echo 'whatbroke is not installed via dpkg/rpm' >&2
-exit 1
-EOF
-    chmod 0755 "$DIST_DIR/uninstall.sh"
-    ok "Local helper scripts written"
-}
-
 main() {
     step "Preparing dist directory"
     rm -rf "$DIST_DIR" "$BUILD_DIR"
@@ -226,7 +180,6 @@ main() {
     build_python_artifacts
     build_deb
     build_rpm
-    write_local_helpers
 
     step "Build summary"
     ls -lh "$DIST_DIR"

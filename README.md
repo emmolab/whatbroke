@@ -40,7 +40,7 @@ The uninstaller:
 
 **Install a specific release:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.1
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.2
 ```
 
 **Build packages locally:**
@@ -352,7 +352,7 @@ Useful flags:
 
 ```bash
 # Pin a specific tag
-curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.1
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --version v0.3.2
 
 # Preview the chosen asset URL only
 curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh | bash -s -- --dry-run
@@ -384,7 +384,7 @@ curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh |
 - repeated or clearly actionable failures should rise to WARN/BROKE/CRIT
 - output should help an on-call Linux admin decide what to inspect next
 
-Recent behavior changes in `0.3.1`:
+Recent behavior changes in `0.3.2`:
 - the runtime banner is now plain and terminal-safe instead of relying on wide ASCII art
 - UFW detection behaves more sensibly under both `sudo` and unprivileged runs, distinguishing confirmed active/inactive state from "installed, but needs sudo to confirm"
 - package-manager lock checks now focus on active transactions and ignore harmless leftover lock files / stale pid files
