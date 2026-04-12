@@ -1,26 +1,56 @@
-name: release-artifacts
+name: release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to upload assets to (e.g. v0.3.0)'
+        description: 'Version tag to build/release (for example v0.4.0)'
+        required: true
+        type: string
+      ref:
+        description: 'Git ref to check out (defaults to the tag when omitted)'
         required: false
         type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
-  build-and-upload:
+  build-and-publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve target ref/tag
+        id: target
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${{ github.ref_name }}"
+            ref="refs/tags/${tag}"
+          else
+            tag="${{ github.event.inputs.tag }}"
+            ref="${{ github.event.inputs.ref || github.event.inputs.tag }}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a version tag like v0.4.0, got: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: Check out source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.target.outputs.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,46 +63,55 @@ jobs:
           sudo apt-get install -y rpm dpkg-dev
           python -m pip install --upgrade pip build
 
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          package_version="$(python3 - <<'PY'
+import pathlib, tomllib
+data = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
+print(data['project']['version'])
+PY
+          )"
+          expected_tag="v${package_version}"
+          if [[ "$expected_tag" != "${{ steps.target.outputs.tag }}" ]]; then
+            echo "Tag/version mismatch: workflow tag is ${{ steps.target.outputs.tag }}, but pyproject.toml says ${package_version}" >&2
+            exit 1
+          fi
+          echo "Building release for ${expected_tag}"
+
       - name: Build release artifacts
         run: ./build-packages.sh
 
       - name: Upload build artifacts to workflow run
         uses: actions/upload-artifact@v4
         with:
-          name: whatbroke-release-artifacts
+          name: whatbroke-${{ steps.target.outputs.tag }}
           path: |
             dist/*.tar.gz
             dist/*.whl
             dist/*.deb
             dist/*.rpm
 
-      - name: Resolve target tag
-        id: target
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag }}
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
-          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              dist/*.tar.gz \
+              dist/*.whl \
+              dist/*.deb \
+              dist/*.rpm \
+              --clobber
           else
-            TAG=$(git describe --tags --abbrev=0)
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            gh release create "$TAG" \
+              dist/*.tar.gz \
+              dist/*.whl \
+              dist/*.deb \
+              dist/*.rpm \
+              --verify-tag \
+              --generate-notes \
+              --title "$TAG"
           fi
-
-      - name: Ensure GitHub Release exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${{ steps.target.outputs.tag }}" >/dev/null 2>&1 || \
-          gh release create "${{ steps.target.outputs.tag }}" --title "${{ steps.target.outputs.tag }}" --generate-notes
-
-      - name: Upload assets to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ steps.target.outputs.tag }}" \
-            dist/*.tar.gz \
-            dist/*.whl \
-            dist/*.deb \
-            dist/*.rpm \
-            --clobber

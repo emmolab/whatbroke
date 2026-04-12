@@ -291,18 +291,40 @@ Requirements for local package building:
 - `.deb`: `dpkg-deb` (`apt install dpkg-dev` or equivalent)
 - `.rpm`: `rpmbuild` (`dnf install rpm-build` / `apt install rpm` or equivalent)
 
-### GitHub Release automation
+### Release a new version
 
-`.github/workflows/release.yml` runs on `release.published` and:
+The release flow is now **tag-driven** instead of “publish a release first, then refresh its assets”.
+
+1. land the feature/fix work on `main`
+2. prepare the version bump + annotated tag locally
+3. push `main` with `--follow-tags`
+4. let GitHub Actions build and publish the artifacts for that tag
+
+```bash
+# Example: cut v0.4.0
+./scripts/prepare-release.sh 0.4.0
+git push origin main --follow-tags
+```
+
+`./scripts/prepare-release.sh` will:
+- validate the requested version
+- update `pyproject.toml` and `whatbroke/__init__.py`
+- create commit `Release vX.Y.Z`
+- create annotated tag `vX.Y.Z`
+
+Pushing that tag triggers `.github/workflows/release.yml`, which:
 
 1. checks out the tagged source
-2. builds sdist + wheel + `.deb` + `.rpm`
-3. uploads them to the workflow run
-4. attaches them to the published GitHub Release
+2. verifies the git tag matches `pyproject.toml`
+3. builds sdist + wheel + `.deb` + `.rpm`
+4. uploads them to the workflow run
+5. creates the GitHub Release automatically if needed, or refreshes the assets if it already exists
 
 That means a release page ends up with:
 - GitHub's automatic source `.zip` and `.tar.gz`
 - built installable packages for Debian-family and RPM-family systems
+
+If you need to rebuild assets for an existing tag without cutting a new version, rerun the workflow manually with `workflow_dispatch` and provide the tag.
 
 ### Auto-install / upgrade script
 
