@@ -70,12 +70,7 @@ jobs:
       - name: Verify tag matches package version
         shell: bash
         run: |
-          package_version="$(python3 - <<'PY'
-import pathlib, tomllib
-data = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
-print(data['project']['version'])
-PY
-          )"
+          package_version="$(python3 -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")"
           expected_tag="v${package_version}"
           if [[ "$expected_tag" != "${{ steps.target.outputs.tag }}" ]]; then
             echo "Tag/version mismatch: workflow tag is ${{ steps.target.outputs.tag }}, but pyproject.toml says ${package_version}" >&2
