@@ -204,7 +204,7 @@ ExecStart=/usr/bin/whatbroke --compact
 - **Change badges** — checks can be tagged `[NEW]`, `[WORSE]`, `[CHANGED]`, `[IMPROVED]`, or `[RECOVERED]`
 - **`--diff` mode** — only shows broken checks that are new or changed since the previous run; prints `No broken checks changed since last run.` otherwise
 
-The pretty view also adds a short `Why:` and/or `Next:` hint for non-OK results so an on-call admin gets immediate context without needing full verbose mode.
+The pretty view adds a short `Next:` hint for non-OK results so an on-call admin gets an immediate fix prompt without needing full verbose mode.
 
 Use `--no-state` to skip reading/writing the state file entirely.
 
@@ -240,11 +240,11 @@ Behaviour:
 
 ```
 disk:      CRIT  2 full drives  [NEW]
-  ↳ Why: service availability or data safety may be at risk.  Next: Free space on the affected filesystem.
+  ↳ Next: Free space on the affected filesystem.
 logs:      CRIT  54 critical journal entries, 50 kernel issues  [WORSE]
-  ↳ Why: service availability or data safety may be at risk.  Next: Review the top noisy unit and recent critical journal lines.
+  ↳ Next: Review the top noisy unit and recent critical journal lines.
 scheduled: CRIT  cron service down
-  ↳ Why: service availability or data safety may be at risk.  Next: Restart cron and inspect why it stopped.
+  ↳ Next: Restart cron and inspect why it stopped.
 networking: WARN  2 NIC error(s)
   ↳ Next: review this check before it escalates.
 services:  WARN  3 stale zombie(s)
@@ -397,7 +397,7 @@ Recent behavior changes in `0.3.1`:
 - Let's Encrypt/certbot state is surfaced more usefully: managed lineage count, earliest expiry context, broken certbot state, and disabled/inactive renewal timers
 - ordinary low-volume journal/kernel noise is de-emphasised; repeated storms and severe events still alert loudly
 - hardware thresholds are less jumpy on long-lived servers
-- non-OK results now include a terse `Why:` / `Next:` line in the pretty output to make triage faster under pressure
+- non-OK results now include a terse `Next:` line in the pretty output to make triage faster under pressure
 - baseline state now tracks all checks, so `--diff` can surface worsened or otherwise changed failures and the main summary can call out recovered checks
 
 ## License

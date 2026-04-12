@@ -37,7 +37,7 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertIn("firewall", state["checks"])
         self.assertEqual(state["checks"]["firewall"]["status"], "WARN")
 
-    def test_result_hint_uses_why_and_next_for_broken_checks(self):
+    def test_result_hint_uses_next_for_broken_checks(self):
         hint = _result_hint(Result(
             name="disk",
             status="CRIT",
@@ -45,8 +45,7 @@ class CliStateAndHintsTests(unittest.TestCase):
             remediation="Free space on /.\nRemove old backups.",
         ))
 
-        self.assertIn("Why:", hint)
-        self.assertIn("Next: Free space on /.", hint)
+        self.assertEqual(hint, "Next: Free space on /.")
 
     def test_diff_reports_worsened_and_changed_broken_checks(self):
         previous_state = {

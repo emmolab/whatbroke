@@ -188,24 +188,15 @@ def _result_hint(r: Result) -> str | None:
     if r.hint:
         return r.hint
 
-    why = {
-        "CRIT": "service availability or data safety may be at risk.",
-        "BROKE": "something user-visible is degraded or partially failed.",
-        "WARN": "it can turn into an outage if it keeps drifting.",
-    }.get(r.status)
-
     next_step = None
     if r.remediation:
         next_step = next((line.strip() for line in r.remediation.splitlines() if line.strip()), None)
 
-    parts = []
-    if why and r.status in {"CRIT", "BROKE"}:
-        parts.append(f"Why: {why}")
     if next_step:
-        parts.append(f"Next: {next_step}")
-    elif r.status == "WARN":
-        parts.append("Next: review this check before it escalates.")
-    return "  ".join(parts) if parts else None
+        return f"Next: {next_step}"
+    if r.status == "WARN":
+        return "Next: review this check before it escalates."
+    return None
 
 
 def _print_result(r: Result, verbose: bool, changes: dict | None = None) -> None:

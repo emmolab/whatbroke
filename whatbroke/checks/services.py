@@ -170,37 +170,38 @@ def check() -> Result:
     remediation_parts = []
 
     failed = _check_failed_systemd_services()
+    failed_details: list[str] = []
     if failed:
-        details.append(f"Systemd failed units: {len(failed)}")
-        details.extend(f"Failed unit: {svc}" for svc in failed[:10])
+        failed_details.append(f"Systemd failed units: {len(failed)}")
+        failed_details.extend(f"Failed unit: {svc}" for svc in failed[:10])
         status = escalate(status, "CRIT")
         remediation_parts.append("Inspect failed units with: systemctl status <unit> && journalctl -u <unit> -n 50")
     else:
-        details.append("Systemd: no failed units")
+        failed_details.append("Systemd: no failed units")
 
     zombie_info = _check_zombie_processes()
     stale_zombies = zombie_info["stale"]
     transient_zombies = zombie_info["transient"]
     total_zombies = len(zombie_info["all"])
+    zombie_details: list[str] = []
     if stale_zombies:
-        oldest_age = stale_zombies[0]["etimes"] if zombie_info["oldest"] else 0
-        details.append(
+        zombie_details.append(
             f"Zombie processes: {len(stale_zombies)} stale (>{_ZOMBIE_GRACE_SECONDS}s), {len(transient_zombies)} transient (<={_ZOMBIE_GRACE_SECONDS}s)"
         )
         for zombie in zombie_info["oldest"][:_ZOMBIE_DETAIL_LIMIT]:
-            details.append(
+            zombie_details.append(
                 "Zombie PID {pid} ppid {ppid} stat {stat} age {etimes}s comm {comm}".format(**zombie)
             )
         if zombie_info["parent_counts"]:
             parent_summary = ", ".join(
                 f"PPID {ppid}: {count}" for ppid, count in zombie_info["parent_counts"].most_common(3)
             )
-            details.append(f"Zombie parents: {parent_summary}")
+            zombie_details.append(f"Zombie parents: {parent_summary}")
         if zombie_info["commands"]:
             command_summary = ", ".join(
                 f"{comm}: {count}" for comm, count in zombie_info["commands"].most_common(3)
             )
-            details.append(f"Zombie commands: {command_summary}")
+            zombie_details.append(f"Zombie commands: {command_summary}")
         sev = "CRIT" if len(stale_zombies) >= _ZOMBIE_CRIT_COUNT else "WARN"
         status = escalate(status, sev)
         remediation_parts.append(
@@ -210,28 +211,33 @@ def check() -> Result:
             "If the parent is unhealthy, restart the owning service cleanly instead of killing children individually"
         )
     elif transient_zombies:
-        details.append(
+        zombie_details.append(
             f"Zombie processes: {len(transient_zombies)} transient (<={_ZOMBIE_GRACE_SECONDS}s); not alerting yet"
         )
     else:
-        details.append("Processes: no zombies")
+        zombie_details.append("Processes: no zombies")
 
     lock_issues, lock_notes, lock_remediation = _check_pkg_manager_locks()
-    details.extend(lock_notes)
+    lock_details = list(lock_notes)
     for issue in lock_issues:
-        details.append(issue)
+        lock_details.append(issue)
         status = escalate(status, "WARN")
     remediation_parts.extend(lock_remediation)
 
     sockets = _check_listening_ports()
-    if sockets:
-        details.append(f"Listening sockets: {len(sockets)}")
-    else:
-        details.append("Listening sockets: unable to enumerate (ss/netstat not found)")
+    socket_details = [f"Listening sockets: {len(sockets)}"] if sockets else ["Listening sockets: unable to enumerate (ss/netstat not found)"]
 
     if status == "OK":
+        details.extend(failed_details)
+        details.extend(zombie_details)
+        details.extend(lock_details)
+        details.extend(socket_details)
         msg = f"No failed units, no stale zombies, {len(sockets)} listening sockets" if sockets else "No failed units or stale zombies"
     else:
+        details.extend(failed_details)
+        if stale_zombies or transient_zombies:
+            details.extend(zombie_details)
+        details.extend([issue for issue in lock_details if "transaction in progress" in issue])
         parts = []
         if failed:
             parts.append(f"{len(failed)} failed unit(s)")

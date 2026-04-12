@@ -48,6 +48,19 @@ class ServicesZombieTests(unittest.TestCase):
         self.assertEqual(result.status, "OK")
         self.assertIn("Ignoring idle apt lock file", " ".join(result.details))
 
+    @patch("whatbroke.checks.services._check_failed_systemd_services", return_value=["cron.service"])
+    @patch("whatbroke.checks.services._check_zombie_processes", return_value={"all": [], "stale": [], "transient": [], "parent_counts": {}, "commands": {}, "oldest": []})
+    @patch("whatbroke.checks.services._check_pkg_manager_locks", return_value=([], ["Ignoring idle apt lock file: /var/lib/dpkg/lock-frontend"], []))
+    @patch("whatbroke.checks.services._check_listening_ports", return_value=[("tcp", "0.0.0.0", "22")])
+    def test_non_ok_result_suppresses_low_signal_service_details(self, *_mocks):
+        result = services.check()
+
+        self.assertEqual(result.status, "CRIT")
+        self.assertIn("Failed unit: cron.service", result.details)
+        self.assertNotIn("Processes: no zombies", result.details)
+        self.assertNotIn("Ignoring idle apt lock file: /var/lib/dpkg/lock-frontend", result.details)
+        self.assertNotIn("Listening sockets: 1", result.details)
+
     @patch("whatbroke.checks.services._file_has_live_holder", return_value=True)
     def test_live_lock_holder_is_reported(self, *_mocks):
         issues, notes, remediation = services._check_pkg_manager_locks()
