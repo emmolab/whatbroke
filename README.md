@@ -324,6 +324,14 @@ That means a release page ends up with:
 - GitHub's automatic source `.zip` and `.tar.gz`
 - built installable packages for Debian-family and RPM-family systems
 
+For this public repo, the release helpers themselves stay committed:
+- `scripts/prepare-release.sh`
+- `scripts/build-release.sh`
+- repo-root `build-packages.sh`, `install.sh`, and `uninstall.sh`
+
+Those are part of the shared source/release workflow and are meant to be reviewed publicly.
+Only generated output stays ignored locally, such as `dist/`, `.build-tmp/`, `.pytest_cache/`, `__pycache__/`, coverage output, and `*.egg-info/`.
+
 If you need to rebuild assets for an existing tag without cutting a new version, rerun the workflow manually with `workflow_dispatch` and provide the tag.
 
 ### Auto-install / upgrade script

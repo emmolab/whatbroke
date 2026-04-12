@@ -1,10 +1,20 @@
-dist/
-build/
-*.egg-info/
-.build-tmp/
+# Generated release/build output
+/dist/
+/build/
+/.build-tmp/
+
+# Generated packaging metadata
+/*.egg-info/
+
+# Generated test/runtime caches
+/.pytest_cache/
 __pycache__/
 **/__pycache__/
 *.pyc
+.coverage
+htmlcov/
+
+# Local environments/tooling
 venv/
 .venv/
 .claude
