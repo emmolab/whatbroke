@@ -17,6 +17,7 @@ class Result:
     message: str
     details: List[str] = field(default_factory=list)
     remediation: Optional[str] = None
+    hint: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.status not in VALID_STATUSES:

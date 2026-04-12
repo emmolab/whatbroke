@@ -122,7 +122,7 @@ whatbroke --watch --broken-only
 ### Incident/alerting workflows
 
 ```bash
-# Only show issues that are NEW since the last run
+# Only show broken checks that are NEW, worse, or otherwise changed since the last run
 whatbroke --diff
 
 # Compact one-liner per broken check — good for scripts and cron
@@ -168,7 +168,7 @@ The overall worst status is used as the **exit code** (0=OK, 1=WARN, 2=BROKE, 3=
 */15 * * * * root whatbroke --compact --diff | mail -s "whatbroke: new issues on $(hostname)" root@localhost
 ```
 
-Because `--diff` outputs nothing when there are no new issues, this only sends mail when a previously-passing check starts failing.
+Because `--diff` outputs nothing when there are no changed broken checks, this only sends mail when a problem appears or materially changes.
 
 ### Monitoring system integration
 ```bash
@@ -199,10 +199,12 @@ ExecStart=/usr/bin/whatbroke --compact
 
 ## State file
 
-`whatbroke` writes issue state to `~/.local/share/whatbroke/state.json` after each run. This powers two features:
+`whatbroke` writes per-check state to `~/.local/share/whatbroke/state.json` after each run. This powers two features:
 
-- **`[NEW]` badge** — checks that weren't broken on the previous run are tagged `[NEW]` in the output
-- **`--diff` mode** — only shows checks that just became broken; prints "No new issues since last run." otherwise
+- **Change badges** — checks can be tagged `[NEW]`, `[WORSE]`, `[CHANGED]`, `[IMPROVED]`, or `[RECOVERED]`
+- **`--diff` mode** — only shows broken checks that are new or changed since the previous run; prints `No broken checks changed since last run.` otherwise
+
+The pretty view also adds a short `Why:` and/or `Next:` hint for non-OK results so an on-call admin gets immediate context without needing full verbose mode.
 
 Use `--no-state` to skip reading/writing the state file entirely.
 
@@ -227,7 +229,7 @@ Filtering:
 
 Behaviour:
   --watch [N]        Live-refresh dashboard every N seconds (default: 5)
-  --diff             Show only checks new/newly broken since last run
+  --diff             Show only broken checks that changed since last run
   --no-state         Don't read or write the state file
   --version          Print version and exit
 ```
@@ -238,9 +240,13 @@ Behaviour:
 
 ```
 disk:      CRIT  2 full drives  [NEW]
-logs:      CRIT  54 critical journal entries, 50 kernel issues
+  ↳ Why: service availability or data safety may be at risk.  Next: Free space on the affected filesystem.
+logs:      CRIT  54 critical journal entries, 50 kernel issues  [WORSE]
+  ↳ Why: service availability or data safety may be at risk.  Next: Review the top noisy unit and recent critical journal lines.
 scheduled: CRIT  cron service down
+  ↳ Why: service availability or data safety may be at risk.  Next: Restart cron and inspect why it stopped.
 networking: WARN  2 NIC error(s)
+  ↳ Next: review this check before it escalates.
 services:  WARN  3 stale zombie(s)
 sysctl:    WARN  2 sysctl misconfiguration(s)
 containers: OK   All container/virtualisation checks passed
@@ -250,7 +256,7 @@ mail:      OK    No MTA detected — mail checks skipped
 security:  OK    Security checks passed
 users:     OK    User accounts look clean (37 total, 1 login)
 
-Overall: CRIT  3 CRIT  3 WARN  12 checks  0.6s  21:23:59  1 new
+Overall: CRIT  3 CRIT  3 WARN  12 checks  0.6s  21:23:59  changed since last run: 1 new  1 worse
 ```
 
 ---
@@ -361,6 +367,8 @@ Recent behavior changes in `0.3.1`:
 - Let's Encrypt/certbot state is surfaced more usefully: managed lineage count, earliest expiry context, broken certbot state, and disabled/inactive renewal timers
 - ordinary low-volume journal/kernel noise is de-emphasised; repeated storms and severe events still alert loudly
 - hardware thresholds are less jumpy on long-lived servers
+- non-OK results now include a terse `Why:` / `Next:` line in the pretty output to make triage faster under pressure
+- baseline state now tracks all checks, so `--diff` can surface worsened or otherwise changed failures and the main summary can call out recovered checks
 
 ## License
 

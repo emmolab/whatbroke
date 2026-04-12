@@ -50,40 +50,102 @@ _STATE_DIR  = os.path.expanduser("~/.local/share/whatbroke")
 _STATE_FILE = os.path.join(_STATE_DIR, "state.json")
 
 
+def _normalize_state(raw: dict) -> dict:
+    if not isinstance(raw, dict):
+        return {"checks": {}}
+
+    checks = raw.get("checks") if isinstance(raw.get("checks"), dict) else raw
+    normalized = {}
+    for name, entry in checks.items():
+        if not isinstance(entry, dict):
+            continue
+        normalized[name] = {
+            "status": entry.get("status", "OK"),
+            "message": entry.get("message", ""),
+            "first_seen": entry.get("first_seen"),
+            "last_seen": entry.get("last_seen"),
+        }
+    return {
+        "updated_at": raw.get("updated_at"),
+        "checks": normalized,
+    }
+
+
 def _load_state() -> dict:
     try:
         with open(_STATE_FILE) as f:
-            return json.load(f)
+            return _normalize_state(json.load(f))
     except (OSError, json.JSONDecodeError):
-        return {}
+        return {"checks": {}}
 
 
-def _save_state(results: list[Result]) -> dict:
-    """Persist current check statuses; return dict of new-issue names."""
-    now   = datetime.now(timezone.utc).isoformat()
-    old   = _load_state()
-    new   = {}
-    fresh = set()
+def _compare_state(results: list[Result], previous: dict) -> dict:
+    old_checks = previous.get("checks", {})
+    changes = {
+        "new": set(),
+        "resolved": set(),
+        "worsened": set(),
+        "improved": set(),
+        "changed": set(),
+        "previous": {},
+    }
 
+    current_names = {r.name for r in results}
     for r in results:
-        key = r.name
-        if r.status != "OK":
-            if key not in old or old[key]["status"] == "OK":
-                fresh.add(key)
-            new[key] = {
-                "status":     r.status,
-                "message":    r.message,
-                "first_seen": old.get(key, {}).get("first_seen", now)
-                              if r.status != "OK" else now,
-                "last_seen":  now,
-            }
-        # OK results are not persisted — they clear any prior entry
+        prior = old_checks.get(r.name)
+        if not prior:
+            if r.status != "OK":
+                changes["new"].add(r.name)
+                changes["changed"].add(r.name)
+            continue
+
+        prior_status = prior.get("status", "OK")
+        prior_message = prior.get("message", "")
+        if prior_status == r.status and prior_message == r.message:
+            continue
+
+        changes["changed"].add(r.name)
+        changes["previous"][r.name] = prior
+        if prior_status == "OK" and r.status != "OK":
+            changes["new"].add(r.name)
+        elif prior_status != "OK" and r.status == "OK":
+            changes["resolved"].add(r.name)
+        elif SEVERITY[r.status] > SEVERITY[prior_status]:
+            changes["worsened"].add(r.name)
+        elif SEVERITY[r.status] < SEVERITY[prior_status]:
+            changes["improved"].add(r.name)
+
+    for name, prior in old_checks.items():
+        if name in current_names:
+            continue
+        if prior.get("status", "OK") != "OK":
+            changes["resolved"].add(name)
+
+    return changes
+
+
+def _save_state(results: list[Result], previous: dict | None = None) -> dict:
+    """Persist current check statuses; return transition summary for this run."""
+    now = datetime.now(timezone.utc).isoformat()
+    old = previous or _load_state()
+    changes = _compare_state(results, old)
+
+    new_checks = {}
+    for r in results:
+        prior = old.get("checks", {}).get(r.name, {})
+        first_seen = now if r.status != "OK" and prior.get("status", "OK") == "OK" else prior.get("first_seen")
+        new_checks[r.name] = {
+            "status": r.status,
+            "message": r.message,
+            "first_seen": first_seen,
+            "last_seen": now,
+        }
 
     os.makedirs(_STATE_DIR, exist_ok=True)
     with open(_STATE_FILE, "w") as f:
-        json.dump(new, f, indent=2)
+        json.dump({"updated_at": now, "checks": new_checks}, f, indent=2)
 
-    return fresh
+    return changes
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -104,11 +166,61 @@ def _run_one(name: str, fn) -> Result:
         return Result(name, "CRIT", "check raised an exception", [str(exc)])
 
 
-def _print_result(r: Result, verbose: bool, new: bool = False) -> None:
-    c    = _color(r.status)
-    tag  = f" {Colors.BOLD}{Colors.CYAN}[NEW]{Colors.END}" if new else ""
+def _transition_tag(name: str, changes: dict) -> str:
+    if name in changes["new"]:
+        label = "NEW"
+    elif name in changes["worsened"]:
+        label = "WORSE"
+    elif name in changes["improved"]:
+        label = "IMPROVED"
+    elif name in changes["resolved"]:
+        label = "RECOVERED"
+    elif name in changes["changed"]:
+        label = "CHANGED"
+    else:
+        return ""
+    return f" {Colors.BOLD}{Colors.CYAN}[{label}]{Colors.END}"
+
+
+def _result_hint(r: Result) -> str | None:
+    if r.status == "OK":
+        return None
+    if r.hint:
+        return r.hint
+
+    why = {
+        "CRIT": "service availability or data safety may be at risk.",
+        "BROKE": "something user-visible is degraded or partially failed.",
+        "WARN": "it can turn into an outage if it keeps drifting.",
+    }.get(r.status)
+
+    next_step = None
+    if r.remediation:
+        next_step = next((line.strip() for line in r.remediation.splitlines() if line.strip()), None)
+
+    parts = []
+    if why and r.status in {"CRIT", "BROKE"}:
+        parts.append(f"Why: {why}")
+    if next_step:
+        parts.append(f"Next: {next_step}")
+    elif r.status == "WARN":
+        parts.append("Next: review this check before it escalates.")
+    return "  ".join(parts) if parts else None
+
+
+def _print_result(r: Result, verbose: bool, changes: dict | None = None) -> None:
+    c = _color(r.status)
+    tag = _transition_tag(r.name, changes or {"new": set(), "worsened": set(), "improved": set(), "resolved": set(), "changed": set()})
     print(f"{Colors.BOLD}{r.name}{Colors.END}: {c}{r.status}{Colors.END}  {r.message}{tag}")
+
+    hint = _result_hint(r)
+    if hint:
+        print(f"  {Colors.DIM}↳ {hint}{Colors.END}")
+
     if verbose:
+        previous = (changes or {}).get("previous", {}).get(r.name)
+        if previous:
+            print(f"  {Colors.DIM}was {previous.get('status', 'OK')}: {previous.get('message', '')}{Colors.END}")
         for d in r.details:
             print(f"  {Colors.CYAN}•{Colors.END} {d}")
         if r.remediation:
@@ -193,6 +305,21 @@ def main() -> None:
         sys.exit(_run_single(checks, args))
 
 
+def _format_change_summary(changes: dict) -> str:
+    parts = []
+    if changes["new"]:
+        parts.append(f"{Colors.CYAN}{len(changes['new'])} new{Colors.END}")
+    if changes["worsened"]:
+        parts.append(f"{Colors.RED}{len(changes['worsened'])} worse{Colors.END}")
+    if changes["improved"]:
+        parts.append(f"{Colors.GREEN}{len(changes['improved'])} improved{Colors.END}")
+    if changes["resolved"]:
+        parts.append(f"{Colors.GREEN}{len(changes['resolved'])} recovered{Colors.END}")
+    if not parts:
+        return ""
+    return "  changed since last run: " + "  ".join(parts)
+
+
 def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     """Run one pass of all checks. Returns exit code."""
     # In watch mode clear the screen before printing
@@ -216,20 +343,24 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
             if results else "OK"
 
     # ── State file ────────────────────────────────────────────────────────────
-    new_issues: set = set()
-    if not args.no_state and not args.compact and not args.json:
-        new_issues = _save_state(results)
+    changes = {"new": set(), "resolved": set(), "worsened": set(), "improved": set(), "changed": set(), "previous": {}}
+    if not args.no_state:
+        previous_state = _load_state()
+        changes = _save_state(results, previous_state)
 
     # ── compact ───────────────────────────────────────────────────────────────
     if args.compact:
-        bad = [r for r in results if r.status != "OK"]
-        if not bad:
-            print(f"{Colors.GREEN}OK{Colors.END}")
-        else:
-            for r in bad:
-                c = _color(r.status)
-                new_tag = " [NEW]" if r.name in new_issues else ""
-                print(f"{r.name}:{c}{r.status}{Colors.END} {r.message}{new_tag}")
+        display = [r for r in results if r.status != "OK"]
+        if args.diff:
+            display = [r for r in display if r.name in changes["new"] or r.name in changes["worsened"] or r.name in changes["changed"]]
+        if not display:
+            if not args.diff:
+                print(f"{Colors.GREEN}OK{Colors.END}")
+            return SEVERITY[worst]
+        for r in display:
+            c = _color(r.status)
+            tag = _transition_tag(r.name, changes)
+            print(f"{r.name}:{c}{r.status}{Colors.END} {r.message}{tag}")
         return SEVERITY[worst]
 
     # ── JSON ──────────────────────────────────────────────────────────────────
@@ -241,6 +372,8 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
                 "message":     r.message,
                 "details":     r.details,
                 "remediation": r.remediation,
+                "hint": _result_hint(r),
+                "change": next((label for label, members in [("new", changes["new"]), ("worse", changes["worsened"]), ("improved", changes["improved"]), ("recovered", changes["resolved"]), ("changed", changes["changed"])] if r.name in members), None),
             }
             for r in results
         ], indent=2))
@@ -256,10 +389,10 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     # --diff: show only checks that became broken since last run
     display = results
     if args.diff:
-        display = [r for r in results if r.name in new_issues]
+        display = [r for r in results if r.name in changes["new"] or r.name in changes["worsened"] or r.name in changes["changed"]]
         if not display:
             c = _color(worst)
-            print(f"{Colors.GREEN}No new issues since last run.{Colors.END}  "
+            print(f"{Colors.GREEN}No broken checks changed since last run.{Colors.END}  "
                   f"(overall: {c}{worst}{Colors.END})\n")
             return SEVERITY[worst]
 
@@ -271,7 +404,7 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
             return SEVERITY[worst]
 
     for r in display:
-        _print_result(r, verbose=args.verbose, new=(r.name in new_issues))
+        _print_result(r, verbose=args.verbose, changes=changes)
 
     # ── summary ───────────────────────────────────────────────────────────────
     c     = _color(worst)
@@ -290,8 +423,9 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
         summary += "  " + "  ".join(parts)
     summary += (f"  {Colors.DIM}{len(results)} checks  "
                 f"{elapsed:.1f}s  {ts}{Colors.END}")
-    if new_issues and not args.diff:
-        summary += f"  {Colors.CYAN}{Colors.BOLD}{len(new_issues)} new{Colors.END}"
+    change_summary = _format_change_summary(changes)
+    if change_summary and not args.diff:
+        summary += change_summary
     print(summary)
 
     return SEVERITY[worst]
