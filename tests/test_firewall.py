@@ -16,6 +16,18 @@ class FirewallTests(unittest.TestCase):
         self.assertEqual(result.message, "Firewall active")
         self.assertIn("ufw: active", result.details)
 
+    @patch("whatbroke.checks.firewall._probe_nftables", return_value=(True, 5, "nftables: 5 rule(s)"))
+    @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(False, "firewalld: installed but not running"))
+    @patch("whatbroke.checks.firewall._probe_ufw", return_value=(False, "ufw: inactive"))
+    def test_check_keeps_inactive_secondary_backends_contextual_when_primary_firewall_is_active(self, *_mocks):
+        result = firewall.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertEqual(result.message, "Firewall active")
+        self.assertIn("nftables: 5 rule(s)", result.details)
+        self.assertIn("ufw: inactive  (inactive backend, another firewall appears active)", result.details)
+        self.assertIn("firewalld: installed but not running  (inactive backend, another firewall appears active)", result.details)
+
     @patch("whatbroke.checks.firewall.os.geteuid", return_value=0)
     @patch("whatbroke.checks.firewall._service_active", return_value=True)
     @patch("whatbroke.checks.firewall._run", return_value=(1, "", ""))

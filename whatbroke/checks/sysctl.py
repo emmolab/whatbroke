@@ -148,7 +148,7 @@ def check() -> Result:
         message=msg,
         details=details,
         remediation=(
-            "Review and set parameters in /etc/sysctl.d/99-hardening.conf, "
-            "then run: sysctl --system"
+            "Review each flagged parameter against the host role before changing it. "
+            "Persist only the settings you actually want in /etc/sysctl.d/*.conf, then run: sysctl --system"
         ) if status != "OK" else None,
     )

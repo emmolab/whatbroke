@@ -126,6 +126,7 @@ def check() -> Result:
     """Firewall status (nftables, iptables, ufw, firewalld)."""
     details = []
     issues = []
+    inactive = []
     status = "OK"
 
     found_any = False
@@ -149,7 +150,7 @@ def check() -> Result:
         elif ufw_active is None:
             firewall_unconfirmed = True
         if ufw_active is False:  # explicitly inactive (not just unknown)
-            issues.append(f"{ufw_detail}")
+            inactive.append(ufw_detail)
         else:
             details.append(ufw_detail)
 
@@ -160,7 +161,7 @@ def check() -> Result:
         if fwd_active:
             firewall_active = True
         if fwd_active is False:
-            issues.append(fwd_detail)
+            inactive.append(fwd_detail)
         else:
             details.append(fwd_detail)
 
@@ -190,6 +191,9 @@ def check() -> Result:
             issues.insert(0, "Firewall present but live status could not be confirmed without privilege")
         else:
             issues.insert(0, "No active firewall rules detected")
+        issues.extend(inactive)
+    else:
+        details.extend(f"{line}  (inactive backend, another firewall appears active)" for line in inactive)
 
     all_details = issues + details
 

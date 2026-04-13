@@ -2,6 +2,7 @@
 set -eu
 
 PKG=whatbroke
+PURGE_STATE=0
 
 need_root() {
   if [ "$(id -u)" -eq 0 ]; then
@@ -61,12 +62,46 @@ detect_package_kind() {
   return 1
 }
 
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --purge-state)
+      PURGE_STATE=1
+      ;;
+    -h|--help)
+      cat <<'EOF'
+whatbroke uninstall script
+
+Usage:
+  sh uninstall.sh [--purge-state]
+
+Options:
+  --purge-state   Also remove root-owned whatbroke state under /root/.local/share/whatbroke
+EOF
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+purge_state() {
+  [ "$PURGE_STATE" -eq 1 ] || return 0
+  if [ -d /root/.local/share/whatbroke ]; then
+    echo "Removing root-owned whatbroke state under /root/.local/share/whatbroke..."
+    need_root rm -rf /root/.local/share/whatbroke
+  fi
+}
+
 kind="$(detect_package_kind || true)"
 
 if [ "$kind" = "deb" ] && has_cmd dpkg; then
   if dpkg -s "$PKG" >/dev/null 2>&1; then
     echo "Uninstalling $PKG via dpkg..."
     need_root dpkg -r "$PKG"
+    purge_state
     exit 0
   fi
 fi
@@ -75,25 +110,19 @@ if [ "$kind" = "rpm" ] && has_cmd rpm; then
   if rpm -q "$PKG" >/dev/null 2>&1; then
     echo "Uninstalling $PKG via rpm..."
     need_root rpm -e "$PKG"
+    purge_state
     exit 0
   fi
 fi
 
-if has_cmd pip; then
-  if pip show "$PKG" >/dev/null 2>&1; then
-    echo "Uninstalling $PKG via pip..."
-    need_root pip uninstall -y "$PKG"
+for pip_cmd in 'python3 -m pip' pip3 pip; do
+  if sh -c "$pip_cmd show '$PKG'" >/dev/null 2>&1; then
+    echo "Uninstalling $PKG via $pip_cmd..."
+    need_root sh -c "$pip_cmd uninstall -y '$PKG'"
+    purge_state
     exit 0
   fi
-fi
-
-if has_cmd pip3; then
-  if pip3 show "$PKG" >/dev/null 2>&1; then
-    echo "Uninstalling $PKG via pip3..."
-    need_root pip3 uninstall -y "$PKG"
-    exit 0
-  fi
-fi
+done
 
 echo "whatbroke does not appear to be installed via the expected package manager on this host."
 exit 1

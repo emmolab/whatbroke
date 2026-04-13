@@ -35,7 +35,8 @@ The installer:
 - installs it, or upgrades an existing installation in place
 
 The uninstaller:
-- removes `whatbroke` via `dpkg`, `rpm`, `pip`, or `pip3` depending on how it was installed
+- removes `whatbroke` via `dpkg`, `rpm`, `python3 -m pip`, `pip3`, or `pip` depending on how it was installed
+- supports `--purge-state` if you also want to remove root-owned state under `/root/.local/share/whatbroke`
 - is safe to re-run if you want a simple removal command for docs or automation
 
 **Install a specific release:**
@@ -76,7 +77,7 @@ Results are sorted worst-first (CRIT → WARN → OK).
 | `logs` | Critical journal entries, repeated error storms, kernel/OOM events |
 | `networking` | Internet/DNS reachability, NTP sync, NIC errors and drops |
 | `security` | Failed SSH logins, update backlog context, SSH policy, locally-managed cert expiry, Let's Encrypt/certbot renewal state, SELinux/AppArmor, entropy pool |
-| `sysctl` | Kernel hardening parameters (ASLR, syncookies, ICMP redirects, rp_filter, kptr_restrict, etc.) |
+| `sysctl` | Kernel hardening parameters (ASLR, syncookies, ICMP redirects, plus contextual values like rp_filter and kptr_restrict) |
 | `firewall` | nftables / iptables / ufw / firewalld active status |
 | `users` | Extra UID-0 accounts, empty passwords, `NOPASSWD:ALL` sudoers grants |
 | `scheduled` | Cron service, systemd timers, recently failed timers |
@@ -104,6 +105,9 @@ whatbroke -b -v
 
 # Focus on specific areas
 whatbroke --only disk,security,sysctl
+
+# Remove the package and root-owned state (if present)
+curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/uninstall.sh | bash -s -- --purge-state
 ```
 
 ### Live dashboard

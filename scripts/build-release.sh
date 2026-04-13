@@ -37,6 +37,13 @@ stage_python_package() {
     find "$dest" -type f -name '*.pyc' -delete
 }
 
+python_sitearch() {
+    python3 - <<'PY'
+import sysconfig
+print(sysconfig.get_path('purelib'))
+PY
+}
+
 write_entrypoint() {
     local path="$1"
     mkdir -p "$(dirname "$path")"
@@ -107,7 +114,7 @@ build_rpm() {
     local tarroot="$BUILD_DIR/${PKG_NAME}-${VERSION}"
     mkdir -p "$topdir"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS} "$tarroot"
 
-    cp -a "$PY_PKG_DIR" "$tarroot/"
+    stage_python_package "$tarroot"
     cp "$REPO_DIR/README.md" "$REPO_DIR/LICENSE" "$tarroot/"
     cat > "$tarroot/${PKG_NAME}.sh" <<'EOF'
 #!/usr/bin/python3
@@ -117,6 +124,9 @@ EOF
     chmod 0755 "$tarroot/${PKG_NAME}.sh"
 
     (cd "$BUILD_DIR" && tar -czf "$sourcedir/${PKG_NAME}-${VERSION}.tar.gz" "${PKG_NAME}-${VERSION}")
+
+    local sitearch
+    sitearch="$(python_sitearch)"
 
     cat > "$topdir/SPECS/${PKG_NAME}.spec" <<EOF
 Name:           $PKG_NAME
@@ -142,15 +152,15 @@ It sorts findings by severity and is intended for practical Linux diagnostics.
 %install
 rm -rf %{buildroot}
 install -d %{buildroot}%{_bindir}
-install -d %{buildroot}/usr/lib/python3.12/site-packages/whatbroke
-cp -a whatbroke/. %{buildroot}/usr/lib/python3.12/site-packages/whatbroke/
+install -d %{buildroot}${sitearch}/whatbroke
+cp -a whatbroke/. %{buildroot}${sitearch}/whatbroke/
 install -m 0755 ${PKG_NAME}.sh %{buildroot}%{_bindir}/${PKG_NAME}
 
 %files
 %license LICENSE
 %doc README.md
 %{_bindir}/${PKG_NAME}
-/usr/lib/python3.12/site-packages/whatbroke
+${sitearch}/whatbroke
 
 %changelog
 * $(LC_ALL=C date '+%a %b %d %Y') Emerson <emerson@example.com> - ${VERSION}-1
