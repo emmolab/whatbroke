@@ -1,0 +1,72 @@
+import unittest
+from unittest.mock import patch
+
+from whatbroke.checks import networking
+
+
+class NetworkingCheckTests(unittest.TestCase):
+    @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
+    @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
+    @patch("whatbroke.checks.networking._check_firewall", return_value={})
+    @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
+    @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
+    @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
+    @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(True, "192.0.2.1"))
+    @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
+    def test_check_reports_ok_for_healthy_network(self, *_mocks):
+        result = networking.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertEqual(result.message, "All networking checks passed")
+        self.assertIn("Gateway reachability: OK (192.0.2.1 via eth0)", result.details)
+        self.assertIn("Outbound HTTPS: OK", result.details)
+
+    @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
+    @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
+    @patch("whatbroke.checks.networking._check_firewall", return_value={})
+    @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
+    @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
+    @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
+    @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(False, "Destination Host Unreachable"))
+    @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
+    def test_check_warns_when_gateway_is_unreachable(self, *_mocks):
+        result = networking.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("gateway unreachable", result.message)
+        self.assertEqual(result.remediation, "Check link state, VLANs, and the upstream gateway")
+
+    @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
+    @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
+    @patch("whatbroke.checks.networking._check_firewall", return_value={})
+    @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", False, "timed out"), ("https://github.com/", False, "timed out")])
+    @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
+    @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
+    @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(True, "192.0.2.1"))
+    @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
+    def test_check_marks_total_https_failure_as_broke(self, *_mocks):
+        result = networking.check()
+
+        self.assertEqual(result.status, "BROKE")
+        self.assertIn("2/2 HTTPS probes failed", result.message)
+        self.assertEqual(result.remediation, "Check outbound 443/TLS reachability, proxy policy, and CA trust")
+
+    @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
+    @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
+    @patch("whatbroke.checks.networking._check_firewall", return_value={})
+    @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
+    @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", None, "temporary failure in name resolution"), ("github.com", None, "temporary failure in name resolution"), ("cloudflare.com", "104.16.132.229", None)])
+    @patch("whatbroke.checks.networking._check_resolver_config", return_value=([], ["no nameserver entries configured"]))
+    @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(True, "192.0.2.1"))
+    @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
+    def test_check_escalates_broken_resolver_and_dns_failures(self, *_mocks):
+        result = networking.check()
+
+        self.assertEqual(result.status, "CRIT")
+        self.assertIn("resolver config broken", result.message)
+        self.assertIn("2 DNS failures", result.message)
+        self.assertEqual(result.remediation, "Check /etc/resolv.conf and your resolver service")
+
+
+if __name__ == "__main__":
+    unittest.main()

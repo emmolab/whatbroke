@@ -75,7 +75,7 @@ Results are sorted worst-first (CRIT → WARN → OK).
 | `hardware` | CPU load, memory, swap, temperatures, uptime context |
 | `services` | Failed systemd units, stale zombie processes, package manager lock files |
 | `logs` | Critical journal entries, repeated error storms, kernel/OOM events |
-| `networking` | Internet/DNS reachability, NTP sync, NIC errors and drops |
+| `networking` | Default route, gateway reachability, DNS sanity, outbound HTTPS, NTP sync, NIC errors and drops |
 | `security` | Failed SSH logins, update backlog context, SSH policy, locally-managed cert expiry, Let's Encrypt/certbot renewal state, SELinux/AppArmor, entropy pool |
 | `sysctl` | Kernel hardening parameters (ASLR, syncookies, ICMP redirects, plus contextual values like rp_filter and kptr_restrict) |
 | `firewall` | nftables / iptables / ufw / firewalld active status |
