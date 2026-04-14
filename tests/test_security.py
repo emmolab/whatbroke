@@ -89,6 +89,36 @@ class SecurityThresholdTests(unittest.TestCase):
         self.assertIn("Let's Encrypt state to review", result.message)
         self.assertIn("certbot.timer", result.remediation)
 
+    @patch("whatbroke.checks.security._check_failed_logins", return_value=(0, []))
+    @patch("whatbroke.checks.security._check_updates", return_value={})
+    @patch("whatbroke.checks.security._check_ssh_config", return_value=[])
+    @patch("whatbroke.checks.security._check_expiring_certs", return_value=[])
+    @patch("whatbroke.checks.security._check_letsencrypt_state", return_value={"managed": 0, "earliest_days": None, "notes": [], "issues": [], "remediation": []})
+    @patch("whatbroke.checks.security._check_selinux_apparmor", return_value=([], []))
+    @patch("whatbroke.checks.security._check_reboot_required", return_value={"required": True, "details": ["Reboot required marker present: /run/reboot-required"], "packages": ["linux-image"], "source": "/run/reboot-required"})
+    @patch("whatbroke.checks.security._check_entropy", return_value=(256, False))
+    def test_explicit_reboot_required_raises_warning(self, *_mocks):
+        result = security.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("reboot pending", result.message)
+        self.assertIn("Reboot required marker present", " ".join(result.details))
+        self.assertIn("controlled reboot", result.remediation)
+
+    @patch("whatbroke.checks.security._check_failed_logins", return_value=(0, []))
+    @patch("whatbroke.checks.security._check_updates", return_value={})
+    @patch("whatbroke.checks.security._check_ssh_config", return_value=[])
+    @patch("whatbroke.checks.security._check_expiring_certs", return_value=[])
+    @patch("whatbroke.checks.security._check_letsencrypt_state", return_value={"managed": 0, "earliest_days": None, "notes": [], "issues": [], "remediation": []})
+    @patch("whatbroke.checks.security._check_selinux_apparmor", return_value=([], []))
+    @patch("whatbroke.checks.security._check_reboot_required", return_value={"required": False, "details": [], "packages": [], "source": None})
+    @patch("whatbroke.checks.security._check_entropy", return_value=(256, False))
+    def test_clean_host_reports_no_explicit_reboot_signal(self, *_mocks):
+        result = security.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertIn("Reboot status: no explicit reboot-required signal detected", result.details)
+
 
 if __name__ == "__main__":
     unittest.main()

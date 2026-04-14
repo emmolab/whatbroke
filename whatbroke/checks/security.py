@@ -13,6 +13,14 @@ _PENDING_UPDATE_WARN = 25
 _PENDING_UPDATE_BROKE = 100
 _CERT_WARN_DAYS = 30
 _CERT_SCAN_LIMIT = 40
+_REBOOT_FLAG_PATHS = (
+    "/run/reboot-required",
+    "/var/run/reboot-required",
+)
+_REBOOT_PKG_PATHS = (
+    "/run/reboot-required.pkgs",
+    "/var/run/reboot-required.pkgs",
+)
 
 
 def _run(cmd, timeout=10):
@@ -333,6 +341,56 @@ def _check_selinux_apparmor() -> tuple[list[str], list[str]]:
     return issues, notes
 
 
+def _check_reboot_required() -> dict:
+    """Return explicit reboot-required state from distro tooling/markers."""
+    state = {
+        "required": False,
+        "details": [],
+        "packages": [],
+        "source": None,
+    }
+
+    for path in _REBOOT_FLAG_PATHS:
+        if not os.path.exists(path):
+            continue
+        state["required"] = True
+        state["source"] = path
+        state["details"].append(f"Reboot required marker present: {path}")
+        break
+
+    for path in _REBOOT_PKG_PATHS:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path) as f:
+                pkgs = [line.strip() for line in f if line.strip()]
+            if pkgs:
+                state["packages"] = pkgs[:10]
+                if len(pkgs) > 10:
+                    state["details"].append(f"Reboot-required packages: {', '.join(pkgs[:10])} (+{len(pkgs) - 10} more)")
+                else:
+                    state["details"].append("Reboot-required packages: " + ", ".join(pkgs))
+        except Exception:
+            pass
+        break
+
+    if shutil.which("needs-restarting"):
+        try:
+            proc = _run(["needs-restarting", "-r"], timeout=20)
+            if proc.returncode == 1:
+                state["required"] = True
+                state["source"] = state["source"] or "needs-restarting -r"
+                state["details"].append("Reboot required according to needs-restarting -r")
+            elif proc.returncode not in (0, 1):
+                line = next((line.strip() for line in (proc.stdout + "\n" + proc.stderr).splitlines() if line.strip()), None)
+                if line:
+                    state["details"].append(f"Reboot check note: {line}")
+        except Exception:
+            pass
+
+    return state
+
+
 def _check_entropy() -> tuple:
     """Return (entropy_avail: int | None, issue: bool)."""
     try:
@@ -436,6 +494,16 @@ def check() -> Result:
     if mac_issues:
         remediation_parts.append("Review SELinux/AppArmor policy mode against your host hardening baseline")
 
+    reboot_state = _check_reboot_required()
+    if reboot_state["required"]:
+        status = escalate(status, "WARN")
+        details.extend(reboot_state["details"])
+        remediation_parts.append("Schedule and perform a controlled reboot once service impact is understood")
+    elif reboot_state["details"]:
+        details.extend(reboot_state["details"])
+    else:
+        details.append("Reboot status: no explicit reboot-required signal detected")
+
     entropy, low_entropy = _check_entropy()
     if entropy is not None:
         if low_entropy:
@@ -464,6 +532,8 @@ def check() -> Result:
             parts.append("Let's Encrypt state to review")
         if mac_issues:
             parts.append("MAC policy to review")
+        if reboot_state["required"]:
+            parts.append("reboot pending")
         msg = "; ".join(parts) if parts else "security issues detected"
 
     remediation = "\n".join(dict.fromkeys(remediation_parts)) if status != "OK" and remediation_parts else None
