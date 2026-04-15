@@ -4,6 +4,17 @@ import subprocess
 from ..result import Result, escalate
 
 
+def _service_exists(name: str) -> bool:
+    try:
+        proc = _run(["systemctl", "status", f"{name}.service"], timeout=5)
+        combined = f"{proc.stdout}\n{proc.stderr}".lower()
+        if "loaded:" in combined or "could not be found" not in combined:
+            return proc.returncode in (0, 1, 2, 3) or "loaded:" in combined
+    except Exception:
+        pass
+    return False
+
+
 def _run(cmd, timeout=10):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
@@ -61,6 +72,42 @@ def _check_crontabs() -> list:
         except Exception:
             pass
     return issues
+
+
+def _system_cron_entries() -> list[str]:
+    """Return system-level cron entry paths that appear active."""
+    entries = []
+    cron_paths = [
+        "/etc/crontab",
+        "/etc/anacrontab",
+    ]
+    cron_dirs = [
+        "/etc/cron.d",
+        "/etc/cron.hourly",
+        "/etc/cron.daily",
+        "/etc/cron.weekly",
+        "/etc/cron.monthly",
+    ]
+
+    for path in cron_paths:
+        try:
+            with open(path) as f:
+                if any(line.strip() and not line.lstrip().startswith("#") for line in f):
+                    entries.append(path)
+        except OSError:
+            pass
+
+    for directory in cron_dirs:
+        try:
+            for name in sorted(os.listdir(directory)):
+                full = os.path.join(directory, name)
+                if name.startswith(".") or not os.path.isfile(full):
+                    continue
+                entries.append(full)
+        except OSError:
+            pass
+
+    return entries
 
 
 def _check_systemd_timers() -> list:
@@ -137,19 +184,26 @@ def check() -> Result:
     status  = "OK"
     remediation = None
 
-    cron_running  = _cron_service_running()
-    cron_issues   = _check_crontabs()
-    timer_issues  = _check_systemd_timers()
-    timer_count   = _list_active_timers()
-    cron_users    = _list_crontab_users()
+    cron_running   = _cron_service_running()
+    cron_issues    = _check_crontabs()
+    timer_issues   = _check_systemd_timers()
+    timer_count    = _list_active_timers()
+    cron_users     = _list_crontab_users()
+    system_cron    = _system_cron_entries()
+    cron_installed = any(_service_exists(svc) for svc in ("cron", "crond"))
+    cron_workload  = bool(cron_users or system_cron)
 
     # Cron service
-    if not cron_running:
+    if cron_running:
+        details.append("Cron service: running")
+    elif cron_workload:
         details.append("Cron service: NOT running")
         status = escalate(status, "CRIT")
         remediation = "systemctl enable --now cron  (or crond on RHEL/CentOS)"
+    elif cron_installed:
+        details.append("Cron service: not running (no cron jobs detected)")
     else:
-        details.append("Cron service: running")
+        details.append("Cron service: not installed")
 
     # Crontab issues
     if cron_issues:
@@ -162,6 +216,11 @@ def check() -> Result:
             details.append(f"User crontabs: {', '.join(cron_users)}")
         else:
             details.append("User crontabs: none configured")
+        if system_cron:
+            details.append(f"System cron entries: {len(system_cron)}")
+            details.extend(system_cron[:10])
+        else:
+            details.append("System cron entries: none detected")
 
     # Systemd timers
     if timer_issues:
@@ -182,7 +241,7 @@ def check() -> Result:
         msg = ", ".join(parts)
     else:
         parts = []
-        if not cron_running:
+        if not cron_running and cron_workload:
             parts.append("cron service down")
         if cron_issues:
             parts.append(f"{len(cron_issues)} crontab issue(s)")
