@@ -1,3 +1,4 @@
+import io
 import unittest
 from unittest.mock import patch
 
@@ -5,6 +6,38 @@ from whatbroke.checks import scheduled
 
 
 class ScheduledCheckTests(unittest.TestCase):
+    def test_system_cron_parser_ignores_env_and_comments(self):
+        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 1, "# comment"))
+        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 2, "MAILTO=root"))
+        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 3, "*/5 * * * * root /usr/local/bin/check"))
+        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 4, "@daily root /usr/local/bin/rotate"))
+
+    def test_system_cron_parser_flags_malformed_entries(self):
+        issue = scheduled._system_cron_issue_from_line("/etc/cron.d/app", 7, "0 0 * * * /usr/local/bin/app")
+        self.assertIn("malformed system cron entry", issue)
+
+        macro_issue = scheduled._system_cron_issue_from_line("/etc/cron.d/app", 8, "@daily root")
+        self.assertIn("malformed system cron macro entry", macro_issue)
+
+    @patch("whatbroke.checks.scheduled.os.path.isfile", return_value=True)
+    @patch("whatbroke.checks.scheduled.os.path.isdir", return_value=True)
+    @patch("whatbroke.checks.scheduled.os.listdir", return_value=["app"])
+    def test_check_system_cron_syntax_detects_bad_cron_d_entry(self, *_mocks):
+        cron_d_body = "MAILTO=root\n0 0 * * * /usr/local/bin/app\n"
+
+        def fake_open(path, *args, **kwargs):
+            if path == "/etc/crontab":
+                raise FileNotFoundError(path)
+            if path == "/etc/cron.d/app":
+                return io.StringIO(cron_d_body)
+            raise FileNotFoundError(path)
+
+        with patch("builtins.open", side_effect=fake_open):
+            issues = scheduled._check_system_cron_syntax()
+
+        self.assertEqual(len(issues), 1)
+        self.assertIn("/etc/cron.d/app:2", issues[0])
+
     @patch("whatbroke.checks.scheduled._check_systemd_timers", return_value=[])
     @patch("whatbroke.checks.scheduled._list_active_timers", return_value=4)
     @patch("whatbroke.checks.scheduled._list_crontab_users", return_value=[])

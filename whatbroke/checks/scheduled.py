@@ -4,6 +4,18 @@ import subprocess
 from ..result import Result, escalate
 
 
+_CRON_MACROS = {
+    "@reboot",
+    "@yearly",
+    "@annually",
+    "@monthly",
+    "@weekly",
+    "@daily",
+    "@midnight",
+    "@hourly",
+}
+
+
 def _service_exists(name: str) -> bool:
     try:
         proc = _run(["systemctl", "status", f"{name}.service"], timeout=5)
@@ -74,6 +86,14 @@ def _check_crontabs() -> list:
     return issues
 
 
+def _looks_like_env_assignment(line: str) -> bool:
+    if "=" not in line:
+        return False
+    key, _, value = line.partition("=")
+    return bool(key.strip()) and " " not in key.strip() and bool(value.strip())
+
+
+
 def _system_cron_entries() -> list[str]:
     """Return system-level cron entry paths that appear active."""
     entries = []
@@ -108,6 +128,53 @@ def _system_cron_entries() -> list[str]:
             pass
 
     return entries
+
+
+
+def _system_cron_issue_from_line(path: str, line_no: int, line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or _looks_like_env_assignment(stripped):
+        return None
+
+    parts = stripped.split()
+    if not parts:
+        return None
+
+    if parts[0].lower() in _CRON_MACROS:
+        if len(parts) < 3:
+            return f"{path}:{line_no}: malformed system cron macro entry: '{stripped}'"
+        return None
+
+    if len(parts) < 7:
+        return f"{path}:{line_no}: malformed system cron entry: '{stripped}'"
+    return None
+
+
+
+def _check_system_cron_syntax() -> list[str]:
+    issues = []
+    cron_files = ["/etc/crontab"]
+    cron_dir = "/etc/cron.d"
+
+    if os.path.isdir(cron_dir):
+        for name in sorted(os.listdir(cron_dir)):
+            if name.startswith("."):
+                continue
+            full = os.path.join(cron_dir, name)
+            if os.path.isfile(full):
+                cron_files.append(full)
+
+    for path in cron_files:
+        try:
+            with open(path) as handle:
+                for line_no, line in enumerate(handle, start=1):
+                    issue = _system_cron_issue_from_line(path, line_no, line)
+                    if issue:
+                        issues.append(issue)
+        except OSError:
+            continue
+
+    return issues
 
 
 def _check_systemd_timers() -> list:
@@ -186,6 +253,7 @@ def check() -> Result:
 
     cron_running   = _cron_service_running()
     cron_issues    = _check_crontabs()
+    system_cron_issues = _check_system_cron_syntax()
     timer_issues   = _check_systemd_timers()
     timer_count    = _list_active_timers()
     cron_users     = _list_crontab_users()
@@ -206,11 +274,12 @@ def check() -> Result:
         details.append("Cron service: not installed")
 
     # Crontab issues
-    if cron_issues:
-        details.append(f"Crontab issues: {len(cron_issues)}")
-        details.extend(cron_issues[:10])
+    combined_cron_issues = cron_issues + system_cron_issues
+    if combined_cron_issues:
+        details.append(f"Crontab issues: {len(combined_cron_issues)}")
+        details.extend(combined_cron_issues[:10])
         status = escalate(status, "WARN")
-        remediation = remediation or "Review user crontabs: crontab -l -u <user>"
+        remediation = remediation or "Review user crontabs and system cron files: crontab -l -u <user>, /etc/crontab, /etc/cron.d/*"
     else:
         if cron_users:
             details.append(f"User crontabs: {', '.join(cron_users)}")
@@ -243,8 +312,8 @@ def check() -> Result:
         parts = []
         if not cron_running and cron_workload:
             parts.append("cron service down")
-        if cron_issues:
-            parts.append(f"{len(cron_issues)} crontab issue(s)")
+        if combined_cron_issues:
+            parts.append(f"{len(combined_cron_issues)} crontab issue(s)")
         if timer_issues:
             parts.append(f"{len(timer_issues)} failed timer(s)")
         msg = ", ".join(parts) if parts else "scheduled task issues"
