@@ -42,6 +42,26 @@ def _cron_service_running() -> bool:
     return False
 
 
+def _user_cron_issue_from_line(user: str, line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or _looks_like_env_assignment(stripped):
+        return None
+
+    parts = stripped.split()
+    if not parts:
+        return None
+
+    if parts[0].lower() in _CRON_MACROS:
+        if len(parts) < 2:
+            return f"{user}: malformed cron macro entry: '{stripped}'"
+        return None
+
+    if len(parts) < 6:
+        return f"{user}: malformed cron entry: '{stripped}'"
+    return None
+
+
+
 def _check_crontabs() -> list:
     """Return list of crontab issue strings for human users."""
     issues = []
@@ -75,12 +95,9 @@ def _check_crontabs() -> list:
                 issues.append(f"{user}: crontab unreadable")
                 continue
             for line in proc.stdout.splitlines():
-                l = line.strip()
-                if not l or l.startswith("#"):
-                    continue
-                parts = l.split()
-                if len(parts) < 6:
-                    issues.append(f"{user}: malformed cron entry: '{l}'")
+                issue = _user_cron_issue_from_line(user, line)
+                if issue:
+                    issues.append(issue)
         except Exception:
             pass
     return issues

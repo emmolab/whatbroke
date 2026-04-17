@@ -6,6 +6,19 @@ from whatbroke.checks import scheduled
 
 
 class ScheduledCheckTests(unittest.TestCase):
+    def test_user_cron_parser_ignores_env_comments_and_valid_macros(self):
+        self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "# comment"))
+        self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "PATH=/usr/local/bin:/usr/bin"))
+        self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "@daily /usr/local/bin/backup"))
+        self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "*/5 * * * * /usr/local/bin/check"))
+
+    def test_user_cron_parser_flags_malformed_entries(self):
+        issue = scheduled._user_cron_issue_from_line("alice", "0 0 * * *")
+        self.assertIn("malformed cron entry", issue)
+
+        macro_issue = scheduled._user_cron_issue_from_line("alice", "@daily")
+        self.assertIn("malformed cron macro entry", macro_issue)
+
     def test_system_cron_parser_ignores_env_and_comments(self):
         self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 1, "# comment"))
         self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 2, "MAILTO=root"))
@@ -37,6 +50,21 @@ class ScheduledCheckTests(unittest.TestCase):
 
         self.assertEqual(len(issues), 1)
         self.assertIn("/etc/cron.d/app:2", issues[0])
+
+    @patch("whatbroke.checks.scheduled._run")
+    def test_check_crontabs_allows_valid_user_macro_entries(self, mock_run):
+        def fake_run(cmd, timeout=5):
+            if cmd[:3] == ["crontab", "-l", "-u"]:
+                return type("Proc", (), {"returncode": 0, "stdout": "@daily /usr/local/bin/backup\n", "stderr": ""})()
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        passwd_data = "alice:x:1000:1000::/home/alice:/bin/bash\n"
+        mock_run.side_effect = fake_run
+
+        with patch("builtins.open", return_value=io.StringIO(passwd_data)):
+            issues = scheduled._check_crontabs()
+
+        self.assertEqual(issues, [])
 
     @patch("whatbroke.checks.scheduled._check_systemd_timers", return_value=[])
     @patch("whatbroke.checks.scheduled._list_active_timers", return_value=4)
