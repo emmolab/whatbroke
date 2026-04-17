@@ -5,7 +5,7 @@ from ..result import Result, escalate
 _WARN_THRESHOLD = 50
 _CRIT_THRESHOLD = 500
 
-_MTA_NAMES = ("postfix", "exim4", "exim", "sendmail", "opensmtpd", "msmtp")
+_MTA_NAMES = ("postfix", "exim4", "exim", "sendmail", "opensmtpd")
 
 
 def _run(cmd, timeout=10):
@@ -101,7 +101,7 @@ def _queue_size(mta: str) -> int | None:
         return _exim_queue_size()
     if mta == "opensmtpd":
         return _opensmtpd_queue_size()
-    # postfix, sendmail, msmtp all expose mailq
+    # postfix and sendmail both expose mailq
     return _mailq_count()
 
 
