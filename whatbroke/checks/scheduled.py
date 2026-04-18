@@ -1,4 +1,5 @@
 import os
+import pwd
 import subprocess
 
 from ..result import Result, escalate
@@ -40,6 +41,35 @@ def _cron_service_running() -> bool:
         except Exception:
             pass
     return False
+
+
+def _crontab_list_command(user: str) -> list[str] | None:
+    """Return the safest crontab -l command for this execution context.
+
+    Non-root runs can only inspect their own crontab reliably, so skip other
+    users instead of emitting false "unreadable" alerts.
+    """
+    try:
+        current_user = pwd.getpwuid(os.geteuid()).pw_name
+    except Exception:
+        current_user = None
+
+    if os.geteuid() == 0:
+        return ["crontab", "-l", "-u", user]
+    if current_user and user == current_user:
+        return ["crontab", "-l"]
+    return None
+
+
+def _crontab_permission_denied(proc) -> bool:
+    combined = f"{proc.stdout}\n{proc.stderr}".lower()
+    markers = (
+        "must be privileged to use -u",
+        "you are not allowed to use this program",
+        "not allowed to use this program",
+        "permission denied",
+    )
+    return any(marker in combined for marker in markers)
 
 
 def _user_cron_issue_from_line(user: str, line: str) -> str | None:
@@ -88,8 +118,13 @@ def _check_crontabs() -> list:
 
     for user in users:
         try:
-            proc = _run(["crontab", "-l", "-u", user], timeout=5)
+            cmd = _crontab_list_command(user)
+            if not cmd:
+                continue
+            proc = _run(cmd, timeout=5)
             if "no crontab for" in proc.stderr.lower():
+                continue
+            if _crontab_permission_denied(proc):
                 continue
             if proc.returncode != 0:
                 issues.append(f"{user}: crontab unreadable")
@@ -248,7 +283,10 @@ def _list_crontab_users() -> list:
                     continue
                 if 1000 <= uid < 65534 and shell not in nologin_shells:
                     try:
-                        proc = _run(["crontab", "-l", "-u", user], timeout=5)
+                        cmd = _crontab_list_command(user)
+                        if not cmd:
+                            continue
+                        proc = _run(cmd, timeout=5)
                         if "no crontab for" not in proc.stderr.lower() and proc.returncode == 0:
                             if any(
                                 l.strip() and not l.strip().startswith("#")
