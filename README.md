@@ -400,6 +400,7 @@ Recent behavior changes in `0.3.2`:
 - security checks now focus certificate scanning on locally managed service certs instead of the whole CA trust store
 - Let's Encrypt/certbot state is surfaced more usefully: managed lineage count, earliest expiry context, broken certbot state, and disabled/inactive renewal timers
 - explicit reboot-required markers now surface as a warning, so patched hosts awaiting a controlled restart do not look fully green
+- scheduled-task detection now ignores disabled/backup cron drop-ins and non-executable run-parts files, reducing cron false positives
 - ordinary low-volume journal/kernel noise is de-emphasised; repeated storms and severe events still alert loudly
 - hardware thresholds are less jumpy on long-lived servers
 - non-OK results now include a terse `Next:` line in the pretty output to make triage faster under pressure

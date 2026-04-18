@@ -16,6 +16,27 @@ _CRON_MACROS = {
     "@hourly",
 }
 
+_CRON_BACKUP_SUFFIXES = (
+    "~",
+    ".bak",
+    ".dpkg-dist",
+    ".dpkg-old",
+    ".dpkg-new",
+    ".disabled",
+    ".orig",
+    ".rpmnew",
+    ".rpmsave",
+    ".sample",
+    ".swp",
+)
+
+_RUN_PARTS_DIRS = {
+    "/etc/cron.hourly",
+    "/etc/cron.daily",
+    "/etc/cron.weekly",
+    "/etc/cron.monthly",
+}
+
 
 def _service_exists(name: str) -> bool:
     try:
@@ -146,6 +167,27 @@ def _looks_like_env_assignment(line: str) -> bool:
 
 
 
+def _cron_entry_disabled_name(name: str) -> bool:
+    return name.startswith(".") or name.endswith(_CRON_BACKUP_SUFFIXES)
+
+
+
+def _run_parts_entry_active(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+
+def _system_cron_entry_active(path: str) -> bool:
+    name = os.path.basename(path)
+    if _cron_entry_disabled_name(name):
+        return False
+    parent = os.path.dirname(path)
+    if parent in _RUN_PARTS_DIRS:
+        return _run_parts_entry_active(path)
+    return os.path.isfile(path)
+
+
+
 def _system_cron_entries() -> list[str]:
     """Return system-level cron entry paths that appear active."""
     entries = []
@@ -173,7 +215,7 @@ def _system_cron_entries() -> list[str]:
         try:
             for name in sorted(os.listdir(directory)):
                 full = os.path.join(directory, name)
-                if name.startswith(".") or not os.path.isfile(full):
+                if not _system_cron_entry_active(full):
                     continue
                 entries.append(full)
         except OSError:
@@ -210,10 +252,8 @@ def _check_system_cron_syntax() -> list[str]:
 
     if os.path.isdir(cron_dir):
         for name in sorted(os.listdir(cron_dir)):
-            if name.startswith("."):
-                continue
             full = os.path.join(cron_dir, name)
-            if os.path.isfile(full):
+            if _system_cron_entry_active(full):
                 cron_files.append(full)
 
     for path in cron_files:

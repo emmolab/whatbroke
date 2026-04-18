@@ -51,6 +51,24 @@ class ScheduledCheckTests(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertIn("/etc/cron.d/app:2", issues[0])
 
+    def test_system_cron_entry_filter_ignores_backup_and_disabled_names(self):
+        self.assertTrue(scheduled._cron_entry_disabled_name("app.disabled"))
+        self.assertTrue(scheduled._cron_entry_disabled_name("app.rpmsave"))
+        self.assertTrue(scheduled._cron_entry_disabled_name(".placeholder"))
+        self.assertFalse(scheduled._cron_entry_disabled_name("app"))
+
+    @patch("whatbroke.checks.scheduled.os.access")
+    @patch("whatbroke.checks.scheduled.os.path.isfile")
+    def test_system_cron_entry_active_requires_executable_run_parts_script(self, mock_isfile, mock_access):
+        mock_isfile.return_value = True
+        mock_access.return_value = False
+
+        self.assertFalse(scheduled._system_cron_entry_active("/etc/cron.daily/backup"))
+
+        mock_access.return_value = True
+        self.assertTrue(scheduled._system_cron_entry_active("/etc/cron.daily/backup"))
+        self.assertTrue(scheduled._system_cron_entry_active("/etc/cron.d/app"))
+
     @patch("whatbroke.checks.scheduled._run")
     def test_check_crontabs_allows_valid_user_macro_entries(self, mock_run):
         def fake_run(cmd, timeout=5):
@@ -65,6 +83,25 @@ class ScheduledCheckTests(unittest.TestCase):
             issues = scheduled._check_crontabs()
 
         self.assertEqual(issues, [])
+
+    @patch("whatbroke.checks.scheduled.os.path.isfile", side_effect=lambda path: not path.endswith((".disabled", ".rpmsave")))
+    @patch("whatbroke.checks.scheduled.os.access", return_value=True)
+    @patch("whatbroke.checks.scheduled.os.listdir", return_value=["job", "job.disabled", "job.rpmsave"])
+    def test_system_cron_entries_ignores_disabled_and_backup_files(self, *_mocks):
+        entries = scheduled._system_cron_entries()
+
+        self.assertIn("/etc/cron.d/job", entries)
+        self.assertNotIn("/etc/cron.d/job.disabled", entries)
+        self.assertNotIn("/etc/cron.d/job.rpmsave", entries)
+
+    @patch("whatbroke.checks.scheduled.os.path.isfile", return_value=True)
+    @patch("whatbroke.checks.scheduled.os.access", side_effect=lambda path, mode: path.endswith("real-job"))
+    @patch("whatbroke.checks.scheduled.os.listdir", return_value=["README", "real-job"])
+    def test_system_cron_entries_ignores_non_executable_run_parts_files(self, *_mocks):
+        entries = scheduled._system_cron_entries()
+
+        self.assertIn("/etc/cron.hourly/real-job", entries)
+        self.assertNotIn("/etc/cron.hourly/README", entries)
 
     @patch("whatbroke.checks.scheduled._check_systemd_timers", return_value=[])
     @patch("whatbroke.checks.scheduled._list_active_timers", return_value=4)
