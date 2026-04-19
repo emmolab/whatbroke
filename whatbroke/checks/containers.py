@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 
 from ..result import Result, escalate
@@ -16,6 +17,22 @@ def _docker_available() -> bool:
         return False
 
 
+def _parse_exit_code(status: str, inspect_exit_code: str | None = None) -> int | None:
+    if inspect_exit_code is not None:
+        try:
+            return int(str(inspect_exit_code).strip())
+        except (TypeError, ValueError):
+            pass
+
+    match = re.search(r"Exited \((\d+)\)", status)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
 def _get_exited_containers() -> list:
     """Return list of human-readable strings for non-zero exited containers."""
     try:
@@ -30,17 +47,21 @@ def _get_exited_containers() -> list:
             if len(parts) < 4:
                 continue
             cid, name, status, image = parts[0][:12], parts[1], parts[2], parts[3]
-            # Get exit code via inspect
-            exit_code = "?"
+            inspect_exit_code = None
             try:
                 ins = _run(
                     ["docker", "inspect", cid,
                      "--format", "{{.State.ExitCode}}"],
                     timeout=3,
                 )
-                exit_code = ins.stdout.strip()
+                inspect_exit_code = ins.stdout.strip()
             except Exception:
                 pass
+
+            exit_code = _parse_exit_code(status, inspect_exit_code)
+            if exit_code is None or exit_code == 0:
+                continue
+
             containers.append(
                 f"{name} [{cid}] — {status} (exit {exit_code}) — image: {image}")
         return containers
