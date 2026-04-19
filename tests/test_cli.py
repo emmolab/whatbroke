@@ -7,7 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from whatbroke.cli import _load_state, _result_hint, _run_single
+from whatbroke.cli import _load_state, _parse_check_filter, _result_hint, _run_single, main
 from whatbroke.result import Result
 
 
@@ -93,6 +93,28 @@ class CliStateAndHintsTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("1 recovered", output)
+
+
+class CliFilterParsingTests(unittest.TestCase):
+    def test_parse_check_filter_trims_whitespace(self):
+        parsed = _parse_check_filter(" disk, security ,logs ", {"disk", "security", "logs"}, "--only")
+
+        self.assertEqual(parsed, {"disk", "security", "logs"})
+
+    def test_parse_check_filter_rejects_unknown_checks(self):
+        with self.assertRaises(SystemExit) as ctx:
+            _parse_check_filter("disk,typo", {"disk", "logs"}, "--only")
+
+        self.assertIn("Unknown check name(s) for --only: typo", str(ctx.exception))
+        self.assertIn("Available checks: disk, logs", str(ctx.exception))
+
+    def test_main_rejects_unknown_skip_checks_before_running(self):
+        with patch("whatbroke.cli.discover_checks", return_value={"disk": lambda: Result("disk", "OK", "healthy")}), \
+             patch("sys.argv", ["whatbroke", "--skip", " typo "]):
+            with self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertIn("Unknown check name(s) for --skip: typo", str(ctx.exception))
 
 
 if __name__ == "__main__":

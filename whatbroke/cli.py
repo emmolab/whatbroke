@@ -44,6 +44,17 @@ _BANNER = (
     "Find what's broken. Fix what matters.\n"
 )
 
+
+def _parse_check_filter(raw: str, known_checks: set[str], flag: str) -> set[str]:
+    selected = {item.strip() for item in raw.split(",") if item.strip()}
+    unknown = sorted(selected - known_checks)
+    if unknown:
+        known = ", ".join(sorted(known_checks))
+        raise SystemExit(
+            f"Unknown check name(s) for {flag}: {', '.join(unknown)}. Available checks: {known}"
+        )
+    return selected
+
 # ── State file (tracks first-seen timestamps for issues) ─────────────────────
 
 _STATE_DIR  = os.path.expanduser("~/.local/share/whatbroke")
@@ -274,12 +285,14 @@ def main() -> None:
 
     checks = discover_checks()
 
+    known_checks = set(checks)
+
     if args.only:
-        allow = set(args.only.split(","))
+        allow = _parse_check_filter(args.only, known_checks, "--only")
         checks = {k: v for k, v in checks.items() if k in allow}
 
     if args.skip:
-        skip = set(args.skip.split(","))
+        skip = _parse_check_filter(args.skip, known_checks, "--skip")
         checks = {k: v for k, v in checks.items() if k not in skip}
 
     # ── watch loop ────────────────────────────────────────────────────────────
