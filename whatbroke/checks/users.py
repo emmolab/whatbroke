@@ -1,3 +1,4 @@
+import re
 import subprocess
 
 from ..result import Result, escalate
@@ -67,6 +68,16 @@ def _parse_shadow_empty_passwords():
     return empty
 
 
+def _is_expected_nopasswd_group_grant(line: str) -> bool:
+    """Allow very common distro defaults like %wheel/%sudo NOPASSWD: ALL."""
+    match = re.match(r"^(%\S+)\s+", line)
+    if not match:
+        return False
+
+    group = match.group(1).lower()
+    return group in {"%wheel", "%sudo", "%admin"}
+
+
 def _check_sudoers():
     """Return list of issue strings from sudoers (NOPASSWD, ALL, wildcards)."""
     issues = []
@@ -85,7 +96,8 @@ def _check_sudoers():
                     if not stripped or stripped.startswith("#"):
                         continue
                     if "NOPASSWD" in stripped and "ALL" in stripped:
-                        # Suppress very common/expected patterns (e.g. %wheel NOPASSWD: ALL)
+                        if _is_expected_nopasswd_group_grant(stripped):
+                            continue
                         issues.append(
                             f"{path}:{lineno}: NOPASSWD:ALL grant — {stripped[:80]}"
                         )
