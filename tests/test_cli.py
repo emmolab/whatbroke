@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import runpy
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -93,6 +94,14 @@ class CliStateAndHintsTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("1 recovered", output)
+
+
+class CliModuleExecutionTests(unittest.TestCase):
+    def test_python_m_entrypoint_delegates_to_cli_main(self):
+        with patch("whatbroke.cli.main") as mock_main:
+            runpy.run_module("whatbroke", run_name="__main__")
+
+        mock_main.assert_called_once_with()
 
 
 class CliFilterParsingTests(unittest.TestCase):
