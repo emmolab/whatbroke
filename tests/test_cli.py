@@ -95,6 +95,24 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("1 recovered", output)
 
+    def test_summary_includes_broke_counts(self):
+        results = {
+            "disk": lambda: Result("disk", "CRIT", "Disk full"),
+            "services": lambda: Result("services", "BROKE", "1 failed unit(s)"),
+            "logs": lambda: Result("logs", "WARN", "Recent errors"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args())
+            output = buf.getvalue()
+
+        self.assertEqual(code, 3)
+        self.assertIn("1 CRIT", output)
+        self.assertIn("1 BROKE", output)
+        self.assertIn("1 WARN", output)
+
 
 class CliModuleExecutionTests(unittest.TestCase):
     def test_python_m_entrypoint_delegates_to_cli_main(self):

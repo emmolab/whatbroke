@@ -418,10 +418,13 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     summary = f"{Colors.BOLD}Overall:{Colors.END} {c}{worst}{Colors.END}"
     if n_bad:
         crit_n = sum(1 for r in results if r.status == "CRIT")
+        broke_n = sum(1 for r in results if r.status == "BROKE")
         warn_n = sum(1 for r in results if r.status == "WARN")
         parts  = []
         if crit_n:
             parts.append(f"{Colors.RED}{crit_n} CRIT{Colors.END}")
+        if broke_n:
+            parts.append(f"{Colors.MAGENTA}{broke_n} BROKE{Colors.END}")
         if warn_n:
             parts.append(f"{Colors.YELLOW}{warn_n} WARN{Colors.END}")
         summary += "  " + "  ".join(parts)

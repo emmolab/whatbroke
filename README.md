@@ -260,7 +260,7 @@ mail:      OK    No MTA detected — mail checks skipped
 security:  OK    Security checks passed
 users:     OK    User accounts look clean (37 total, 1 login)
 
-Overall: CRIT  3 CRIT  3 WARN  12 checks  0.6s  21:23:59  changed since last run: 1 new  1 worse
+Overall: CRIT  3 CRIT  1 BROKE  3 WARN  12 checks  0.6s  21:23:59  changed since last run: 1 new  1 worse
 ```
 
 ---
