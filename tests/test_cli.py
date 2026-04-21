@@ -113,6 +113,48 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertIn("1 BROKE", output)
         self.assertIn("1 WARN", output)
 
+    def test_json_broken_only_filters_out_ok_results(self):
+        results = {
+            "disk": lambda: Result("disk", "CRIT", "Disk full"),
+            "security": lambda: Result("security", "OK", "Healthy"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(json=True, broken_only=True))
+            payload = json.loads(buf.getvalue())
+
+        self.assertEqual(code, 3)
+        self.assertEqual([item["name"] for item in payload], ["disk"])
+
+    def test_json_diff_only_outputs_changed_broken_results(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "firewall": {"status": "WARN", "message": "Firewall status unclear", "first_seen": None, "last_seen": None},
+                "services": {"status": "BROKE", "message": "1 failed unit(s)", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "firewall": lambda: Result("firewall", "CRIT", "No active firewall rules detected"),
+            "services": lambda: Result("services", "BROKE", "2 failed unit(s)"),
+            "security": lambda: Result("security", "OK", "Healthy"),
+            "users": lambda: Result("users", "WARN", "Empty password detected"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(json=True, diff=True))
+            payload = json.loads(buf.getvalue())
+
+        self.assertEqual(code, 3)
+        self.assertEqual([item["name"] for item in payload], ["firewall", "services", "users"])
+        self.assertEqual(payload[0]["change"], "worse")
+        self.assertEqual(payload[1]["change"], "changed")
+        self.assertEqual(payload[2]["change"], "new")
+
 
 class CliModuleExecutionTests(unittest.TestCase):
     def test_python_m_entrypoint_delegates_to_cli_main(self):

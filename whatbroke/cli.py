@@ -274,7 +274,7 @@ def main() -> None:
     p.add_argument("--watch", metavar="SECONDS", type=int, nargs="?", const=5,
                    help="Refresh every N seconds (default 5). Ctrl-C to stop.")
     p.add_argument("--diff", action="store_true",
-                   help="Only show checks that are new/newly broken since last run")
+                   help="Only show broken checks that are new, worse, or otherwise changed since last run")
     p.add_argument("--no-state", action="store_true",
                    help="Do not read or write the state file (~/.local/share/whatbroke/state.json)")
 
@@ -369,6 +369,12 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
 
     # ── JSON ──────────────────────────────────────────────────────────────────
     if args.json:
+        display = results
+        if args.diff:
+            display = [r for r in display if r.status != "OK" and (r.name in changes["new"] or r.name in changes["worsened"] or r.name in changes["changed"])]
+        elif args.broken_only:
+            display = [r for r in display if r.status != "OK"]
+
         print(json.dumps([
             {
                 "name":        r.name,
@@ -379,7 +385,7 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
                 "hint": _result_hint(r),
                 "change": next((label for label, members in [("new", changes["new"]), ("worse", changes["worsened"]), ("improved", changes["improved"]), ("recovered", changes["resolved"]), ("changed", changes["changed"])] if r.name in members), None),
             }
-            for r in results
+            for r in display
         ], indent=2))
         return SEVERITY[worst]
 
