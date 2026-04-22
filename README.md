@@ -54,13 +54,17 @@ sudo ./dist/install.sh
 ```bash
 git clone https://github.com/emmolab/whatbroke.git
 cd whatbroke
-PYTHONPATH=. python3 -m whatbroke.cli
+python3 -m whatbroke
 ```
+
+That uses the package entrypoint directly, so the source-tree smoke test matches the installed operator workflow.
 
 **pip install (development/local use):**
 ```bash
 pip install -e .
 whatbroke
+# or, if you prefer the Python module entrypoint
+python3 -m whatbroke
 ```
 
 ---
