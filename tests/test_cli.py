@@ -54,11 +54,13 @@ class CliStateAndHintsTests(unittest.TestCase):
             "checks": {
                 "firewall": {"status": "WARN", "message": "Firewall status unclear", "first_seen": None, "last_seen": None},
                 "services": {"status": "BROKE", "message": "1 failed unit(s)", "first_seen": None, "last_seen": None},
+                "hardware": {"status": "OK", "message": "Load normal", "first_seen": None, "last_seen": None},
             },
         }
         results = {
             "firewall": lambda: Result("firewall", "CRIT", "No active firewall rules detected", remediation="Enable nftables"),
             "services": lambda: Result("services", "BROKE", "2 failed unit(s)", remediation="Restart the failed unit"),
+            "hardware": lambda: Result("hardware", "OK", "Load healthy"),
             "security": lambda: Result("security", "OK", "Healthy"),
         }
 
@@ -73,6 +75,7 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertIn("[WORSE]", output)
         self.assertIn("services", output)
         self.assertIn("[CHANGED]", output)
+        self.assertNotIn("hardware", output)
         self.assertNotIn("security", output)
 
     def test_summary_includes_recovered_counts(self):

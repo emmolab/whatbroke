@@ -399,7 +399,11 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     # --diff: show only checks that became broken since last run
     display = results
     if args.diff:
-        display = [r for r in results if r.name in changes["new"] or r.name in changes["worsened"] or r.name in changes["changed"]]
+        display = [
+            r for r in results
+            if r.status != "OK"
+            and (r.name in changes["new"] or r.name in changes["worsened"] or r.name in changes["changed"])
+        ]
         if not display:
             c = _color(worst)
             print(f"{Colors.GREEN}No broken checks changed since last run.{Colors.END}  "
