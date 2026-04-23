@@ -341,6 +341,20 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     if show_banner and watch_interval is None:
         _print_header()
 
+    if not checks:
+        if args.json:
+            print("[]")
+        elif args.compact:
+            print("No checks selected")
+        else:
+            if watch_interval is not None:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print(f"{Colors.BOLD}{Colors.CYAN}WhatBroke{Colors.END}  "
+                      f"{Colors.DIM}{ts}  refreshing every {watch_interval}s  "
+                      f"(Ctrl-C to stop){Colors.END}\n")
+            print(f"{Colors.YELLOW}No checks selected.{Colors.END}\n")
+        return 0
+
     # ── Run checks ────────────────────────────────────────────────────────────
     results_map, elapsed = _run_checks(checks)
 

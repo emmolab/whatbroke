@@ -131,6 +131,23 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertEqual(code, 3)
         self.assertEqual([item["name"] for item in payload], ["disk"])
 
+    def test_run_single_handles_empty_check_selection(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = _run_single({}, self._args())
+
+        self.assertEqual(code, 0)
+        self.assertIn("No checks selected.", buf.getvalue())
+
+    def test_json_mode_handles_empty_check_selection(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = _run_single({}, self._args(json=True))
+        payload = json.loads(buf.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, [])
+
     def test_json_diff_only_outputs_changed_broken_results(self):
         previous_state = {
             "updated_at": "2026-04-11T00:00:00+00:00",
@@ -197,6 +214,16 @@ class CliFilterParsingTests(unittest.TestCase):
                 main()
 
         self.assertIn("Unknown check name(s) for --skip: typo", str(ctx.exception))
+
+    def test_main_handles_filters_that_leave_no_checks(self):
+        with patch("whatbroke.cli.discover_checks", return_value={"disk": lambda: Result("disk", "OK", "healthy")}), \
+             patch("sys.argv", ["whatbroke", "--only", "disk", "--skip", "disk"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn("No checks selected.", buf.getvalue())
 
 
 if __name__ == "__main__":
