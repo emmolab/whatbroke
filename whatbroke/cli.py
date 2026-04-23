@@ -251,6 +251,8 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="whatbroke",
                                 description="Linux system diagnostics tool")
     p.add_argument("--version", action="version", version=f"whatbroke {__version__}")
+    p.add_argument("--list-checks", action="store_true",
+                   help="List available check names and exit")
 
     # Output modes
     p.add_argument("--compact", action="store_true",
@@ -284,6 +286,11 @@ def main() -> None:
         _disable_colors()
 
     checks = discover_checks()
+
+    if args.list_checks:
+        for name in sorted(checks):
+            print(name)
+        raise SystemExit(0)
 
     known_checks = set(checks)
 

@@ -168,6 +168,16 @@ class CliModuleExecutionTests(unittest.TestCase):
 
 
 class CliFilterParsingTests(unittest.TestCase):
+    def test_main_lists_checks_and_exits(self):
+        with patch("whatbroke.cli.discover_checks", return_value={"logs": lambda: Result("logs", "OK", "healthy"), "disk": lambda: Result("disk", "OK", "healthy")}), \
+             patch("sys.argv", ["whatbroke", "--list-checks"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["disk", "logs"])
+
     def test_parse_check_filter_trims_whitespace(self):
         parsed = _parse_check_filter(" disk, security ,logs ", {"disk", "security", "logs"}, "--only")
 
