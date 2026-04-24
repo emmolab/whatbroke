@@ -113,6 +113,9 @@ whatbroke --only disk,security,sysctl
 # See the exact check names you can use with --only/--skip
 whatbroke --list-checks
 
+# Add one-line descriptions when choosing a focused run
+whatbroke --list-checks -v
+
 # Remove the package and root-owned state (if present)
 curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/uninstall.sh | bash -s -- --purge-state
 ```
@@ -242,7 +245,7 @@ Behaviour:
   --watch [N]        Live-refresh dashboard every N seconds (default: 5)
   --diff             Show only broken checks that changed since last run
   --no-state         Don't read or write the state file
-  --list-checks      List available check names and exit
+  --list-checks      List available check names and exit (add -v for descriptions)
   --version          Print version and exit
 ```
 

@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -289,7 +290,11 @@ def main() -> None:
 
     if args.list_checks:
         for name in sorted(checks):
-            print(name)
+            if args.verbose:
+                desc = inspect.getdoc(checks[name]) or "No description available."
+                print(f"{name}: {desc}")
+            else:
+                print(name)
         raise SystemExit(0)
 
     known_checks = set(checks)
