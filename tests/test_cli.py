@@ -219,6 +219,30 @@ class CliFilterParsingTests(unittest.TestCase):
             ],
         )
 
+    def test_main_lists_checks_as_json(self):
+        def disk_check():
+            """Disk capacity and storage health."""
+            return Result("disk", "OK", "healthy")
+
+        def logs_check():
+            """Critical journal errors and noisy failures."""
+            return Result("logs", "OK", "healthy")
+
+        with patch("whatbroke.cli.discover_checks", return_value={"logs": logs_check, "disk": disk_check}), \
+             patch("sys.argv", ["whatbroke", "--list-checks", "--json"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(
+            json.loads(buf.getvalue()),
+            [
+                {"name": "disk", "description": "Disk capacity and storage health."},
+                {"name": "logs", "description": "Critical journal errors and noisy failures."},
+            ],
+        )
+
     def test_parse_check_filter_trims_whitespace(self):
         parsed = _parse_check_filter(" disk, security ,logs ", {"disk", "security", "logs"}, "--only")
 

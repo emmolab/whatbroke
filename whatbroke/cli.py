@@ -289,12 +289,22 @@ def main() -> None:
     checks = discover_checks()
 
     if args.list_checks:
-        for name in sorted(checks):
-            if args.verbose:
-                desc = inspect.getdoc(checks[name]) or "No description available."
-                print(f"{name}: {desc}")
-            else:
-                print(name)
+        ordered = sorted(checks)
+        if args.json:
+            print(json.dumps([
+                {
+                    "name": name,
+                    "description": inspect.getdoc(checks[name]) or "No description available.",
+                }
+                for name in ordered
+            ], indent=2))
+        else:
+            for name in ordered:
+                if args.verbose:
+                    desc = inspect.getdoc(checks[name]) or "No description available."
+                    print(f"{name}: {desc}")
+                else:
+                    print(name)
         raise SystemExit(0)
 
     known_checks = set(checks)

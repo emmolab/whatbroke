@@ -116,6 +116,9 @@ whatbroke --list-checks
 # Add one-line descriptions when choosing a focused run
 whatbroke --list-checks -v
 
+# Machine-readable check inventory for wrappers or tooling
+whatbroke --list-checks --json | jq .
+
 # Remove the package and root-owned state (if present)
 curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/uninstall.sh | bash -s -- --purge-state
 ```
