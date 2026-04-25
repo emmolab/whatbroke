@@ -243,6 +243,32 @@ class CliFilterParsingTests(unittest.TestCase):
             ],
         )
 
+    def test_main_lists_checks_after_only_filter(self):
+        with patch("whatbroke.cli.discover_checks", return_value={
+            "logs": lambda: Result("logs", "OK", "healthy"),
+            "disk": lambda: Result("disk", "OK", "healthy"),
+            "security": lambda: Result("security", "OK", "healthy"),
+        }), patch("sys.argv", ["whatbroke", "--list-checks", "--only", " security , disk "]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["disk", "security"])
+
+    def test_main_lists_checks_after_skip_filter(self):
+        with patch("whatbroke.cli.discover_checks", return_value={
+            "logs": lambda: Result("logs", "OK", "healthy"),
+            "disk": lambda: Result("disk", "OK", "healthy"),
+            "security": lambda: Result("security", "OK", "healthy"),
+        }), patch("sys.argv", ["whatbroke", "--list-checks", "--skip", "logs"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["disk", "security"])
+
     def test_parse_check_filter_trims_whitespace(self):
         parsed = _parse_check_filter(" disk, security ,logs ", {"disk", "security", "logs"}, "--only")
 

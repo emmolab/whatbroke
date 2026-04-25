@@ -113,6 +113,9 @@ whatbroke --only disk,security,sysctl
 # See the exact check names you can use with --only/--skip
 whatbroke --list-checks
 
+# Preview the exact filtered set before you run it
+whatbroke --list-checks --only disk,security
+
 # Add one-line descriptions when choosing a focused run
 whatbroke --list-checks -v
 

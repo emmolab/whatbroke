@@ -287,6 +287,15 @@ def main() -> None:
         _disable_colors()
 
     checks = discover_checks()
+    known_checks = set(checks)
+
+    if args.only:
+        allow = _parse_check_filter(args.only, known_checks, "--only")
+        checks = {k: v for k, v in checks.items() if k in allow}
+
+    if args.skip:
+        skip = _parse_check_filter(args.skip, known_checks, "--skip")
+        checks = {k: v for k, v in checks.items() if k not in skip}
 
     if args.list_checks:
         ordered = sorted(checks)
@@ -306,16 +315,6 @@ def main() -> None:
                 else:
                     print(name)
         raise SystemExit(0)
-
-    known_checks = set(checks)
-
-    if args.only:
-        allow = _parse_check_filter(args.only, known_checks, "--only")
-        checks = {k: v for k, v in checks.items() if k in allow}
-
-    if args.skip:
-        skip = _parse_check_filter(args.skip, known_checks, "--skip")
-        checks = {k: v for k, v in checks.items() if k not in skip}
 
     # ── watch loop ────────────────────────────────────────────────────────────
     if args.watch is not None:
