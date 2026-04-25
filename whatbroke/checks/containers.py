@@ -142,31 +142,32 @@ def _check_kubernetes() -> list:
     return issues
 
 
-def _check_libvirt() -> list:
-    """Return list of VM issue strings on virtualisation hosts."""
+def _check_libvirt() -> tuple[list[str], list[str]]:
+    """Return (issues, notes) for libvirt VMs on virtualisation hosts."""
     issues = []
+    notes = []
     if not os.path.exists('/var/lib/libvirt'):
-        return issues
+        return issues, notes
     try:
         proc = _run(["systemctl", "is-active", "libvirtd"], timeout=5)
         if "active" not in proc.stdout:
             issues.append("libvirtd: not running")
-            return issues
+            return issues, notes
 
         proc = _run(["virsh", "list", "--all"], timeout=10)
         if proc.returncode == 0:
             for line in proc.stdout.strip().splitlines()[2:]:
                 parts = line.split()
                 if len(parts) >= 3:
-                    name  = parts[1]
-                    state = " ".join(parts[2:])
-                    if "shut off" in state.lower():
-                        issues.append(f"VM {name}: shut off")
-                    elif "paused" in state.lower():
+                    name = parts[1]
+                    state = " ".join(parts[2:]).lower()
+                    if "paused" in state:
                         issues.append(f"VM {name}: paused")
+                    elif "shut off" in state:
+                        notes.append(f"VM {name}: shut off (not alerting by default)")
     except Exception:
         pass
-    return issues
+    return issues, notes
 
 
 def check() -> Result:
@@ -221,14 +222,18 @@ def check() -> Result:
             pass
 
     # libvirt VMs
-    vm_issues = _check_libvirt()
+    vm_issues, vm_notes = _check_libvirt()
     if vm_issues:
-        details.append(f"VMs: {len(vm_issues)} issue(s)")
+        details.append(f"VMs: {len(vm_issues)} actionable issue(s)")
         details.extend(vm_issues[:5])
         status = escalate(status, "WARN")
-        remediation = remediation or "virsh start <name>"
+        remediation = remediation or "virsh resume <name>  (or investigate why the VM paused)"
     elif os.path.exists('/var/lib/libvirt'):
-        details.append("VMs: all running")
+        details.append("VMs: no paused guests detected")
+
+    if vm_notes:
+        details.append(f"VMs intentionally inactive or stopped: {len(vm_notes)}")
+        details.extend(vm_notes[:5])
 
     # Message
     if status == "OK":

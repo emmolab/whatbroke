@@ -85,7 +85,7 @@ Results are sorted worst-first (CRIT → WARN → OK).
 | `firewall` | nftables / iptables / ufw / firewalld active status |
 | `users` | Extra UID-0 accounts, empty passwords, `NOPASSWD:ALL` sudoers grants |
 | `scheduled` | Cron service, systemd timers, recently failed timers |
-| `containers` | Docker/Podman exited or crash-looping containers, Kubernetes node status |
+| `containers` | Docker/Podman exited or crash-looping containers, Kubernetes node status, paused libvirt guests |
 | `mail` | MTA service running (postfix/exim/sendmail/opensmtpd), mail queue depth (>50 WARN, >500 CRIT) |
 
 ---

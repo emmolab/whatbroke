@@ -32,7 +32,7 @@ class ContainersTests(unittest.TestCase):
         self.assertIn("api", exited[0])
         self.assertNotIn("backup-job", "\n".join(exited))
 
-    @patch("whatbroke.checks.containers._check_libvirt", return_value=[])
+    @patch("whatbroke.checks.containers._check_libvirt", return_value=([], []))
     @patch("whatbroke.checks.containers._check_kubernetes", return_value=[])
     @patch("whatbroke.checks.containers._get_restarting_containers", return_value=[])
     @patch("whatbroke.checks.containers._get_exited_containers", return_value=[])
@@ -42,6 +42,46 @@ class ContainersTests(unittest.TestCase):
 
         self.assertEqual(result.status, "OK")
         self.assertIn("All container/virtualisation checks passed", result.message)
+
+    @patch("whatbroke.checks.containers.os.path.exists", return_value=True)
+    @patch("whatbroke.checks.containers._run")
+    def test_check_libvirt_treats_shut_off_guests_as_notes(self, mock_run, _mock_exists):
+        mock_run.side_effect = [
+            SimpleNamespace(stdout="active\n", returncode=0),
+            SimpleNamespace(
+                stdout=(
+                    " Id   Name          State\n"
+                    "-------------------------------\n"
+                    " -    build-box     shut off\n"
+                ),
+                returncode=0,
+            ),
+        ]
+
+        issues, notes = containers._check_libvirt()
+
+        self.assertEqual(issues, [])
+        self.assertEqual(notes, ["VM build-box: shut off (not alerting by default)"])
+
+    @patch("whatbroke.checks.containers.os.path.exists", return_value=True)
+    @patch("whatbroke.checks.containers._run")
+    def test_check_libvirt_flags_paused_guests(self, mock_run, _mock_exists):
+        mock_run.side_effect = [
+            SimpleNamespace(stdout="active\n", returncode=0),
+            SimpleNamespace(
+                stdout=(
+                    " Id   Name          State\n"
+                    "-------------------------------\n"
+                    " 3    api-vm        paused\n"
+                ),
+                returncode=0,
+            ),
+        ]
+
+        issues, notes = containers._check_libvirt()
+
+        self.assertEqual(issues, ["VM api-vm: paused"])
+        self.assertEqual(notes, [])
 
 
 if __name__ == "__main__":
