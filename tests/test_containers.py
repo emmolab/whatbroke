@@ -43,6 +43,32 @@ class ContainersTests(unittest.TestCase):
         self.assertEqual(result.status, "OK")
         self.assertIn("All container/virtualisation checks passed", result.message)
 
+    @patch("whatbroke.checks.containers._check_libvirt", return_value=([], []))
+    @patch("whatbroke.checks.containers._check_kubernetes", return_value=[])
+    @patch("whatbroke.checks.containers._get_restarting_containers", return_value=[])
+    @patch("whatbroke.checks.containers._get_exited_containers", return_value=["api [abc123] — Exited (1) 5 minutes ago (exit 1) — image: myapp:latest"])
+    @patch("whatbroke.checks.containers._docker_available", return_value=True)
+    def test_check_uses_conservative_remediation_for_exited_containers(self, *_mocks):
+        result = containers.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("Inspect failed containers first", result.remediation)
+        self.assertIn("Remove exited containers only after confirming", result.remediation)
+        self.assertNotIn("docker rm $(docker ps -aq -f status=exited)", result.remediation)
+
+    @patch("whatbroke.checks.containers._check_libvirt", return_value=(["VM api-vm: paused"], []))
+    @patch("whatbroke.checks.containers._check_kubernetes", return_value=["Node node-1: NotReady"])
+    @patch("whatbroke.checks.containers._get_restarting_containers", return_value=["api [abc123] — Restarting (restarts: 7) — image: myapp:latest"])
+    @patch("whatbroke.checks.containers._get_exited_containers", return_value=["worker [def456] — Exited (1) 5 minutes ago (exit 1) — image: myapp:latest"])
+    @patch("whatbroke.checks.containers._docker_available", return_value=True)
+    def test_check_aggregates_remediation_for_multiple_issue_types(self, *_mocks):
+        result = containers.check()
+
+        self.assertEqual(result.status, "CRIT")
+        self.assertIn("docker logs <container>", result.remediation)
+        self.assertIn("kubectl describe pod <name> -n <ns>", result.remediation)
+        self.assertIn("virsh domstate <name>", result.remediation)
+
     @patch("whatbroke.checks.containers.os.path.exists", return_value=True)
     @patch("whatbroke.checks.containers._run")
     def test_check_libvirt_treats_shut_off_guests_as_notes(self, mock_run, _mock_exists):

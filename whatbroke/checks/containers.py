@@ -174,7 +174,12 @@ def check() -> Result:
     """Docker containers, Kubernetes cluster health, libvirt VMs."""
     details = []
     status  = "OK"
-    remediation = None
+    remediation_parts = []
+
+    exited = []
+    restarting = []
+    k8s_issues = []
+    vm_issues = []
 
     # Docker
     docker_up = _docker_available()
@@ -190,7 +195,8 @@ def check() -> Result:
             if len(exited) > 5:
                 details.append(f"  ...and {len(exited) - 5} more")
             status = escalate(status, "WARN")
-            remediation = "docker rm $(docker ps -aq -f status=exited)"
+            remediation_parts.append("Inspect failed containers first with: docker ps -a --filter status=exited and docker logs <container>")
+            remediation_parts.append("Remove exited containers only after confirming they are safe to discard")
         else:
             details.append("Docker containers: none exited")
 
@@ -199,7 +205,7 @@ def check() -> Result:
             details.append(f"Restarting containers: {len(restarting)}")
             details.extend([f"  {c}" for c in restarting[:3]])
             status = escalate(status, "WARN")
-            remediation = remediation or "docker logs <container> to investigate restart loop"
+            remediation_parts.append("Inspect restart loops with: docker logs <container> and docker inspect <container>")
 
     # Kubernetes
     k8s_issues = _check_kubernetes()
@@ -211,7 +217,7 @@ def check() -> Result:
             for kw in ("CrashLoopBackOff", "NotReady", "OOMKilled")
         ) else "WARN"
         status = escalate(status, sev)
-        remediation = remediation or "kubectl describe pod <name> -n <ns>"
+        remediation_parts.append("Inspect affected workloads with: kubectl describe pod <name> -n <ns>")
     else:
         # Only report k8s status if kubectl is available
         try:
@@ -227,7 +233,7 @@ def check() -> Result:
         details.append(f"VMs: {len(vm_issues)} actionable issue(s)")
         details.extend(vm_issues[:5])
         status = escalate(status, "WARN")
-        remediation = remediation or "virsh resume <name>  (or investigate why the VM paused)"
+        remediation_parts.append("Investigate paused guests with: virsh domstate <name> and virsh resume <name> if appropriate")
     elif os.path.exists('/var/lib/libvirt'):
         details.append("VMs: no paused guests detected")
 
@@ -248,10 +254,12 @@ def check() -> Result:
             parts.append(f"{len(vm_issues)} VM issue(s)")
         msg = ", ".join(parts) if parts else "container issues detected"
 
+    remediation = "\n".join(dict.fromkeys(remediation_parts)) if status != "OK" and remediation_parts else None
+
     return Result(
         name="containers",
         status=status,
         message=msg,
         details=details,
-        remediation=remediation if status != "OK" else None,
+        remediation=remediation,
     )
