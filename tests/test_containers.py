@@ -26,17 +26,17 @@ class ContainersTests(unittest.TestCase):
             SimpleNamespace(stdout="1\n", returncode=0),
         ]
 
-        exited = containers._get_exited_containers()
+        exited = containers._get_exited_containers("docker")
 
         self.assertEqual(len(exited), 1)
-        self.assertIn("api", exited[0])
+        self.assertIn("docker:api", exited[0])
         self.assertNotIn("backup-job", "\n".join(exited))
 
     @patch("whatbroke.checks.containers._check_libvirt", return_value=([], []))
     @patch("whatbroke.checks.containers._check_kubernetes", return_value=[])
     @patch("whatbroke.checks.containers._get_restarting_containers", return_value=[])
     @patch("whatbroke.checks.containers._get_exited_containers", return_value=[])
-    @patch("whatbroke.checks.containers._docker_available", return_value=True)
+    @patch("whatbroke.checks.containers._runtime_available", side_effect=lambda runtime: runtime == "docker")
     def test_check_stays_ok_when_only_clean_exits_were_filtered_out(self, *_mocks):
         result = containers.check()
 
@@ -46,21 +46,21 @@ class ContainersTests(unittest.TestCase):
     @patch("whatbroke.checks.containers._check_libvirt", return_value=([], []))
     @patch("whatbroke.checks.containers._check_kubernetes", return_value=[])
     @patch("whatbroke.checks.containers._get_restarting_containers", return_value=[])
-    @patch("whatbroke.checks.containers._get_exited_containers", return_value=["api [abc123] — Exited (1) 5 minutes ago (exit 1) — image: myapp:latest"])
-    @patch("whatbroke.checks.containers._docker_available", return_value=True)
+    @patch("whatbroke.checks.containers._get_exited_containers", return_value=["docker:api [abc123] — Exited (1) 5 minutes ago (exit 1) — image: myapp:latest"])
+    @patch("whatbroke.checks.containers._runtime_available", side_effect=lambda runtime: runtime == "docker")
     def test_check_uses_conservative_remediation_for_exited_containers(self, *_mocks):
         result = containers.check()
 
         self.assertEqual(result.status, "WARN")
-        self.assertIn("Inspect failed containers first", result.remediation)
+        self.assertIn("Inspect failed docker containers first", result.remediation)
         self.assertIn("Remove exited containers only after confirming", result.remediation)
         self.assertNotIn("docker rm $(docker ps -aq -f status=exited)", result.remediation)
 
     @patch("whatbroke.checks.containers._check_libvirt", return_value=(["VM api-vm: paused"], []))
     @patch("whatbroke.checks.containers._check_kubernetes", return_value=["Node node-1: NotReady"])
-    @patch("whatbroke.checks.containers._get_restarting_containers", return_value=["api [abc123] — Restarting (restarts: 7) — image: myapp:latest"])
-    @patch("whatbroke.checks.containers._get_exited_containers", return_value=["worker [def456] — Exited (1) 5 minutes ago (exit 1) — image: myapp:latest"])
-    @patch("whatbroke.checks.containers._docker_available", return_value=True)
+    @patch("whatbroke.checks.containers._get_restarting_containers", return_value=["docker:api [abc123] — Restarting (restarts: 7) — image: myapp:latest"])
+    @patch("whatbroke.checks.containers._get_exited_containers", return_value=["docker:worker [def456] — Exited (1) 5 minutes ago (exit 1) — image: myapp:latest"])
+    @patch("whatbroke.checks.containers._runtime_available", side_effect=lambda runtime: runtime == "docker")
     def test_check_aggregates_remediation_for_multiple_issue_types(self, *_mocks):
         result = containers.check()
 
@@ -108,6 +108,19 @@ class ContainersTests(unittest.TestCase):
 
         self.assertEqual(issues, ["VM api-vm: paused"])
         self.assertEqual(notes, [])
+
+    @patch("whatbroke.checks.containers._check_libvirt", return_value=([], []))
+    @patch("whatbroke.checks.containers._check_kubernetes", return_value=[])
+    @patch("whatbroke.checks.containers._get_restarting_containers", side_effect=lambda runtime: ["podman:api [abc123] — Restarting (restarts: 3) — image: quay.io/example/api:latest"] if runtime == "podman" else [])
+    @patch("whatbroke.checks.containers._get_exited_containers", side_effect=lambda runtime: ["podman:worker [def456] — Exited (125) 2 minutes ago (exit 125) — image: quay.io/example/worker:latest"] if runtime == "podman" else [])
+    @patch("whatbroke.checks.containers._runtime_available", side_effect=lambda runtime: runtime == "podman")
+    def test_check_supports_podman_without_docker(self, *_mocks):
+        result = containers.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("podman:worker", " ".join(result.details))
+        self.assertIn("podman logs <container>", result.remediation)
+        self.assertIn("1 exited containers", result.message)
 
 
 if __name__ == "__main__":

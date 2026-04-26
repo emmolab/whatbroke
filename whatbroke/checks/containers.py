@@ -9,9 +9,9 @@ def _run(cmd, timeout=10):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
-def _docker_available() -> bool:
+def _runtime_available(runtime: str) -> bool:
     try:
-        proc = _run(["docker", "info"], timeout=5)
+        proc = _run([runtime, "info"], timeout=5)
         return proc.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
@@ -33,11 +33,11 @@ def _parse_exit_code(status: str, inspect_exit_code: str | None = None) -> int |
     return None
 
 
-def _get_exited_containers() -> list:
+def _get_exited_containers(runtime: str) -> list:
     """Return list of human-readable strings for non-zero exited containers."""
     try:
         proc = _run(
-            ["docker", "ps", "-a", "--filter", "status=exited",
+            [runtime, "ps", "-a", "--filter", "status=exited",
              "--format", "{{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Image}}"],
             timeout=10,
         )
@@ -50,7 +50,7 @@ def _get_exited_containers() -> list:
             inspect_exit_code = None
             try:
                 ins = _run(
-                    ["docker", "inspect", cid,
+                    [runtime, "inspect", cid,
                      "--format", "{{.State.ExitCode}}"],
                     timeout=3,
                 )
@@ -63,17 +63,17 @@ def _get_exited_containers() -> list:
                 continue
 
             containers.append(
-                f"{name} [{cid}] — {status} (exit {exit_code}) — image: {image}")
+                f"{runtime}:{name} [{cid}] — {status} (exit {exit_code}) — image: {image}")
         return containers
     except Exception:
         return []
 
 
-def _get_restarting_containers() -> list:
+def _get_restarting_containers(runtime: str) -> list:
     """Return list of containers in a restart loop with restart count."""
     try:
         proc = _run(
-            ["docker", "ps",
+            [runtime, "ps",
              "--format", "{{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Image}}"],
             timeout=10,
         )
@@ -88,7 +88,7 @@ def _get_restarting_containers() -> list:
             restart_count = "?"
             try:
                 ins = _run(
-                    ["docker", "inspect", cid,
+                    [runtime, "inspect", cid,
                      "--format", "{{.RestartCount}}"],
                     timeout=3,
                 )
@@ -96,7 +96,7 @@ def _get_restarting_containers() -> list:
             except Exception:
                 pass
             containers.append(
-                f"{name} [{cid}] — {status} (restarts: {restart_count}) — image: {image}")
+                f"{runtime}:{name} [{cid}] — {status} (restarts: {restart_count}) — image: {image}")
         return containers
     except Exception:
         return []
@@ -181,31 +181,32 @@ def check() -> Result:
     k8s_issues = []
     vm_issues = []
 
-    # Docker
-    docker_up = _docker_available()
-    if not docker_up:
-        details.append("Docker: not running or not installed (skipping container checks)")
+    runtimes = [runtime for runtime in ("docker", "podman") if _runtime_available(runtime)]
+    if not runtimes:
+        details.append("Containers: docker/podman not running or not installed (skipping container checks)")
     else:
-        details.append("Docker: daemon running")
+        details.append(f"Containers: checking {', '.join(runtimes)}")
+        for runtime in runtimes:
+            runtime_exited = _get_exited_containers(runtime)
+            exited.extend(runtime_exited)
+            if runtime_exited:
+                details.append(f"{runtime.capitalize()} exited containers: {len(runtime_exited)}")
+                details.extend([f"  {c}" for c in runtime_exited[:5]])
+                if len(runtime_exited) > 5:
+                    details.append(f"  ...and {len(runtime_exited) - 5} more")
+                status = escalate(status, "WARN")
+                remediation_parts.append(f"Inspect failed {runtime} containers first with: {runtime} ps -a --filter status=exited and {runtime} logs <container>")
+                remediation_parts.append("Remove exited containers only after confirming they are safe to discard")
+            else:
+                details.append(f"{runtime.capitalize()} containers: none exited")
 
-        exited = _get_exited_containers()
-        if exited:
-            details.append(f"Exited containers: {len(exited)}")
-            details.extend([f"  {c}" for c in exited[:5]])
-            if len(exited) > 5:
-                details.append(f"  ...and {len(exited) - 5} more")
-            status = escalate(status, "WARN")
-            remediation_parts.append("Inspect failed containers first with: docker ps -a --filter status=exited and docker logs <container>")
-            remediation_parts.append("Remove exited containers only after confirming they are safe to discard")
-        else:
-            details.append("Docker containers: none exited")
-
-        restarting = _get_restarting_containers()
-        if restarting:
-            details.append(f"Restarting containers: {len(restarting)}")
-            details.extend([f"  {c}" for c in restarting[:3]])
-            status = escalate(status, "WARN")
-            remediation_parts.append("Inspect restart loops with: docker logs <container> and docker inspect <container>")
+            runtime_restarting = _get_restarting_containers(runtime)
+            restarting.extend(runtime_restarting)
+            if runtime_restarting:
+                details.append(f"{runtime.capitalize()} restarting containers: {len(runtime_restarting)}")
+                details.extend([f"  {c}" for c in runtime_restarting[:3]])
+                status = escalate(status, "WARN")
+                remediation_parts.append(f"Inspect {runtime} restart loops with: {runtime} logs <container> and {runtime} inspect <container>")
 
     # Kubernetes
     k8s_issues = _check_kubernetes()
@@ -246,7 +247,7 @@ def check() -> Result:
         msg = "All container/virtualisation checks passed"
     else:
         parts = []
-        if exited if docker_up else []:
+        if exited:
             parts.append(f"{len(exited)} exited containers")
         if k8s_issues:
             parts.append(f"{len(k8s_issues)} k8s issue(s)")
