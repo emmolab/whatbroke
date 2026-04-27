@@ -25,6 +25,19 @@ _SECURITY_PARAMS = [
     ),
 ]
 
+_IPV6_SECURITY_PARAMS = [
+    (
+        "net.ipv6.conf.all.accept_redirects",
+        "0", "WARN",
+        "IPv6 redirect acceptance enabled — routing can be manipulated",
+    ),
+    (
+        "net.ipv6.conf.default.accept_redirects",
+        "0", "WARN",
+        "IPv6 redirect acceptance enabled on new interfaces",
+    ),
+]
+
 _CONTEXT_PARAMS = [
     (
         "fs.suid_dumpable",
@@ -40,11 +53,6 @@ _CONTEXT_PARAMS = [
         "kernel.kptr_restrict",
         None, None,
         "informational: hardened hosts often use >= 1",
-    ),
-    (
-        "net.ipv6.conf.all.accept_redirects",
-        None, None,
-        "informational: many admins disable this, but treatment depends on IPv6 use on the host",
     ),
     (
         "net.ipv4.conf.all.rp_filter",
@@ -71,6 +79,13 @@ def _sysctl(key: str):
         return None
 
 
+def _ipv6_enabled() -> bool:
+    disabled = _sysctl("net.ipv6.conf.all.disable_ipv6")
+    if disabled is None:
+        return False
+    return disabled != "1"
+
+
 def check() -> Result:
     """Kernel security hardening and performance sysctl parameters."""
     details = []
@@ -89,6 +104,21 @@ def check() -> Result:
                 status = escalate(status, sev)
         else:
             details.append(f"{key} = {val}  OK")
+
+    ipv6_enabled = _ipv6_enabled()
+    if ipv6_enabled:
+        for key, expected, sev, desc in _IPV6_SECURITY_PARAMS:
+            val = _sysctl(key)
+            if val is None:
+                continue
+            if expected is not None and val != expected:
+                issues.append(f"{key} = {val}  (expected {expected}) — {desc}")
+                if sev:
+                    status = escalate(status, sev)
+            else:
+                details.append(f"{key} = {val}  OK")
+    else:
+        details.append("net.ipv6: disabled or not exposed by this kernel")
 
     for key, _, _, desc in _CONTEXT_PARAMS:
         val = _sysctl(key)
