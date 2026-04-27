@@ -7,7 +7,6 @@ from whatbroke.checks import networking
 class NetworkingCheckTests(unittest.TestCase):
     @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
     @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
-    @patch("whatbroke.checks.networking._check_firewall", return_value={})
     @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
     @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
     @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
@@ -23,7 +22,6 @@ class NetworkingCheckTests(unittest.TestCase):
 
     @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
     @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
-    @patch("whatbroke.checks.networking._check_firewall", return_value={})
     @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
     @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
     @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
@@ -38,7 +36,6 @@ class NetworkingCheckTests(unittest.TestCase):
 
     @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
     @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
-    @patch("whatbroke.checks.networking._check_firewall", return_value={})
     @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", False, "timed out"), ("https://github.com/", False, "timed out")])
     @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
     @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
@@ -53,7 +50,6 @@ class NetworkingCheckTests(unittest.TestCase):
 
     @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
     @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
-    @patch("whatbroke.checks.networking._check_firewall", return_value={})
     @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
     @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", None, "temporary failure in name resolution"), ("github.com", None, "temporary failure in name resolution"), ("cloudflare.com", "104.16.132.229", None)])
     @patch("whatbroke.checks.networking._check_resolver_config", return_value=([], ["no nameserver entries configured"]))

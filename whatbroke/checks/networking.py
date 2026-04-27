@@ -113,36 +113,6 @@ def _check_gateway_reachability(gateway: str | None) -> tuple[bool | None, str]:
         return False, str(exc)
 
 
-def _check_firewall() -> dict:
-    """Return dict of firewall name → status string."""
-    fw = {}
-    if shutil.which("ufw"):
-        try:
-            proc = _run(["ufw", "status"], timeout=5)
-            first_line = proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else "unknown"
-            fw["ufw"] = first_line
-        except Exception:
-            pass
-
-    if shutil.which("firewall-cmd"):
-        try:
-            proc = _run(["firewall-cmd", "--state"], timeout=5)
-            fw["firewalld"] = proc.stdout.strip()
-        except Exception:
-            pass
-
-    if not fw and shutil.which("iptables"):
-        try:
-            proc = _run(["iptables", "-L", "-n", "--line-numbers"], timeout=5)
-            if proc.returncode == 0:
-                rules = len([l for l in proc.stdout.splitlines()
-                              if l and not l.startswith(('Chain', 'target', 'num'))])
-                fw["iptables"] = f"{rules} rules"
-        except Exception:
-            pass
-    return fw
-
-
 def _check_ntp_sync() -> tuple:
     """Return (synced: bool | None, details: str).
     None means timedatectl not available."""
@@ -247,7 +217,7 @@ def _check_nic_errors() -> list:
 
 
 def check() -> Result:
-    """Routing, gateway reachability, DNS sanity, outbound HTTPS, firewall, NTP, NIC errors."""
+    """Routing, gateway reachability, DNS sanity, outbound HTTPS, NTP, NIC errors."""
     details = []
     status = "OK"
     remediation = None
@@ -303,17 +273,6 @@ def check() -> Result:
         remediation = remediation or "Check outbound 443/TLS reachability, proxy policy, and CA trust"
     else:
         details.append("Outbound HTTPS: OK")
-
-    fw = _check_firewall()
-    for name, fw_status in fw.items():
-        if "inactive" in fw_status.lower() or "not running" in fw_status.lower():
-            details.append(f"Firewall {name}: {fw_status} — DISABLED")
-            status = escalate(status, "WARN")
-            remediation = remediation or f"Enable firewall: {name} enable"
-        else:
-            details.append(f"Firewall {name}: {fw_status}")
-    if not fw:
-        details.append("Firewall: no ufw/firewalld/iptables detected")
 
     synced, ntp_detail = _check_ntp_sync()
     if synced is False:
