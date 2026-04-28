@@ -284,7 +284,8 @@ def check() -> Result:
         details.append("Outbound HTTPS: OK")
 
     synced, ntp_detail = _check_ntp_sync()
-    if synced is False:
+    ntp_unsynchronised = synced is False
+    if ntp_unsynchronised:
         details.append(f"NTP: NOT synchronised — {ntp_detail}")
         status = escalate(status, "WARN")
         remediation = remediation or "Enable NTP: timedatectl set-ntp true"
@@ -313,6 +314,8 @@ def check() -> Result:
             parts.append(f"{len(failed_dns)} DNS failures")
         if failed_https:
             parts.append(f"{len(failed_https)}/{len(https_results)} HTTPS probes failed")
+        if ntp_unsynchronised:
+            parts.append("NTP unsynchronised")
         if nic_issues:
             parts.append(f"{len(nic_issues)} NIC error(s)")
         msg = ", ".join(parts) if parts else "networking issues detected"

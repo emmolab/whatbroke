@@ -74,6 +74,34 @@ class NetworkingCheckTests(unittest.TestCase):
         self.assertIn("2 DNS failures", result.message)
         self.assertEqual(result.remediation, "Check /etc/resolv.conf and your resolver service")
 
+    @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
+    @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(False, "NTP service: systemd-timesyncd"))
+    @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
+    @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
+    @patch("whatbroke.checks.networking._check_resolver_config", return_value=([], []))
+    @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(True, "192.0.2.1"))
+    @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
+    def test_check_summarises_unsynchronised_ntp(self, *_mocks):
+        result = networking.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("NTP unsynchronised", result.message)
+        self.assertEqual(result.remediation, "Enable NTP: timedatectl set-ntp true")
+
+    @patch("whatbroke.checks.networking._check_nic_errors", return_value=["eth0: 42 RX errors", "eth1: 200 RX drops"])
+    @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
+    @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])
+    @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
+    @patch("whatbroke.checks.networking._check_resolver_config", return_value=([], []))
+    @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(True, "192.0.2.1"))
+    @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
+    def test_check_summarises_nic_issues(self, *_mocks):
+        result = networking.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("2 NIC error(s)", result.message)
+        self.assertEqual(result.remediation, "Check NIC hardware and driver: ethtool <iface>")
+
 
 if __name__ == "__main__":
     unittest.main()
