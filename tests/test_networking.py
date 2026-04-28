@@ -1,3 +1,4 @@
+import socket
 import unittest
 from unittest.mock import patch
 
@@ -5,6 +6,16 @@ from whatbroke.checks import networking
 
 
 class NetworkingCheckTests(unittest.TestCase):
+    @patch("whatbroke.checks.networking.socket.getaddrinfo")
+    def test_dns_resolution_accepts_ipv6_results(self, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:2800:220:1:248:1893:25c8:1946", 0, 0, 0)),
+        ]
+
+        results = networking._test_dns_resolution()
+
+        self.assertEqual(results[0], ("example.com", "2606:2800:220:1:248:1893:25c8:1946", None))
+
     @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
     @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
     @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", True, "HTTP 200"), ("https://github.com/", True, "HTTP 200")])

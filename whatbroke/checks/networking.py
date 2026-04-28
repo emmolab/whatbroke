@@ -63,7 +63,16 @@ def _test_dns_resolution() -> list[tuple[str, str | None, str | None]]:
     results = []
     for domain in domains:
         try:
-            ip = socket.gethostbyname(domain)
+            infos = socket.getaddrinfo(domain, None, type=socket.SOCK_STREAM)
+            addresses = []
+            for family, _socktype, _proto, _canonname, sockaddr in infos:
+                if family == socket.AF_INET:
+                    addresses.append(sockaddr[0])
+                elif family == socket.AF_INET6:
+                    addresses.append(sockaddr[0])
+            ip = next((addr for addr in addresses if ":" not in addr), None) or next(iter(addresses), None)
+            if ip is None:
+                raise OSError("resolver returned no usable addresses")
             results.append((domain, ip, None))
         except Exception as exc:
             results.append((domain, None, str(exc)))
