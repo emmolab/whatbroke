@@ -34,13 +34,16 @@ stage_python_package() {
     mkdir -p "$dest"
     cp -a "$PY_PKG_DIR" "$dest/"
     find "$dest" -type d -name '__pycache__' -prune -exec rm -rf {} +
-    find "$dest" -type f -name '*.pyc' -delete
+    find "$dest" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 }
 
 python_sitearch() {
     python3 - <<'PY'
 import sysconfig
-print(sysconfig.get_path('purelib'))
+path = sysconfig.get_path('purelib')
+if path.startswith('/usr/local/'):
+    path = path.replace('/usr/local/', '/usr/', 1)
+print(path)
 PY
 }
 
@@ -161,6 +164,10 @@ install -m 0755 ${PKG_NAME}.sh %{buildroot}%{_bindir}/${PKG_NAME}
 %doc README.md
 %{_bindir}/${PKG_NAME}
 ${sitearch}/whatbroke
+%exclude ${sitearch}/whatbroke/__pycache__
+%exclude ${sitearch}/whatbroke/__pycache__/*
+%exclude ${sitearch}/whatbroke/checks/__pycache__
+%exclude ${sitearch}/whatbroke/checks/__pycache__/*
 
 %changelog
 * $(LC_ALL=C date '+%a %b %d %Y') Emerson <emerson@example.com> - ${VERSION}-1
