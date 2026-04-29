@@ -38,12 +38,27 @@ class NetworkingCheckTests(unittest.TestCase):
     @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
     @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(False, "Destination Host Unreachable"))
     @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
-    def test_check_warns_when_gateway_is_unreachable(self, *_mocks):
+    def test_check_does_not_alert_on_gateway_ping_failure_when_broader_connectivity_is_healthy(self, *_mocks):
+        result = networking.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertEqual(result.message, "All networking checks passed")
+        self.assertIn("Gateway reachability: inconclusive", " ".join(result.details))
+        self.assertIsNone(result.remediation)
+
+    @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
+    @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))
+    @patch("whatbroke.checks.networking._test_outbound_https", return_value=[("https://example.com/", False, "timed out"), ("https://github.com/", True, "HTTP 200")])
+    @patch("whatbroke.checks.networking._test_dns_resolution", return_value=[("example.com", "93.184.216.34", None), ("github.com", "140.82.121.4", None), ("cloudflare.com", "104.16.132.229", None)])
+    @patch("whatbroke.checks.networking._check_resolver_config", return_value=(["1.1.1.1"], []))
+    @patch("whatbroke.checks.networking._check_gateway_reachability", return_value=(False, "Destination Host Unreachable"))
+    @patch("whatbroke.checks.networking._check_default_route", return_value=(True, "default via 192.0.2.1 dev eth0", "192.0.2.1", "eth0"))
+    def test_check_keeps_gateway_warning_when_other_connectivity_signals_are_failing(self, *_mocks):
         result = networking.check()
 
         self.assertEqual(result.status, "WARN")
         self.assertIn("gateway unreachable", result.message)
-        self.assertEqual(result.remediation, "Check link state, VLANs, and the upstream gateway")
+        self.assertEqual(result.remediation, "Check outbound 443/TLS reachability, proxy policy, and CA trust")
 
     @patch("whatbroke.checks.networking._check_nic_errors", return_value=[])
     @patch("whatbroke.checks.networking._check_ntp_sync", return_value=(True, "NTP service: systemd-timesyncd"))

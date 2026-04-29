@@ -240,18 +240,6 @@ def check() -> Result:
         remediation = "ip route add default via <gateway>"
 
     gateway_ok, gateway_detail = _check_gateway_reachability(gateway if has_route else None)
-    if gateway_ok is True:
-        label = gateway or gateway_detail
-        if iface:
-            details.append(f"Gateway reachability: OK ({label} via {iface})")
-        else:
-            details.append(f"Gateway reachability: OK ({label})")
-    elif gateway_ok is False:
-        details.append(f"Gateway reachability: FAIL ({gateway or 'unknown gateway'}: {gateway_detail})")
-        status = escalate(status, "WARN")
-        remediation = remediation or "Check link state, VLANs, and the upstream gateway"
-    elif gateway_detail:
-        details.append(f"Gateway reachability: skipped ({gateway_detail})")
 
     nameservers, resolver_issues = _check_resolver_config()
     if nameservers:
@@ -283,6 +271,24 @@ def check() -> Result:
     else:
         details.append("Outbound HTTPS: OK")
 
+    gateway_failure_is_actionable = gateway_ok is False and (
+        not has_route or resolver_issues or failed_dns or failed_https
+    )
+    if gateway_ok is True:
+        label = gateway or gateway_detail
+        if iface:
+            details.append(f"Gateway reachability: OK ({label} via {iface})")
+        else:
+            details.append(f"Gateway reachability: OK ({label})")
+    elif gateway_ok is False:
+        detail_prefix = "FAIL" if gateway_failure_is_actionable else "inconclusive"
+        details.append(f"Gateway reachability: {detail_prefix} ({gateway or 'unknown gateway'}: {gateway_detail})")
+        if gateway_failure_is_actionable:
+            status = escalate(status, "WARN")
+            remediation = remediation or "Check link state, VLANs, and the upstream gateway"
+    elif gateway_detail:
+        details.append(f"Gateway reachability: skipped ({gateway_detail})")
+
     synced, ntp_detail = _check_ntp_sync()
     ntp_unsynchronised = synced is False
     if ntp_unsynchronised:
@@ -306,7 +312,7 @@ def check() -> Result:
         parts = []
         if not has_route:
             parts.append("no default route")
-        elif gateway_ok is False:
+        elif gateway_failure_is_actionable:
             parts.append("gateway unreachable")
         if resolver_issues:
             parts.append("resolver config broken")
