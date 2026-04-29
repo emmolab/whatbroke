@@ -91,14 +91,42 @@ Description: Linux system diagnostics tool for sysadmins
  for conservative Linux diagnostics rather than noisy alert spam.
 EOF
 
+    cat > "$root/DEBIAN/postrm" <<'EOF'
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+  remove|purge)
+    for base in \
+      /usr/lib/python3/dist-packages \
+      /usr/local/lib/python3/dist-packages \
+      /usr/lib/python3/site-packages \
+      /usr/local/lib/python3/site-packages \
+      /usr/lib/python*/site-packages \
+      /usr/local/lib/python*/site-packages
+    do
+      for pkgdir in $base/whatbroke; do
+        [ -e "$pkgdir" ] || continue
+        find "$pkgdir" -type d -name '__pycache__' -prune -exec rm -rf {} +
+        find "$pkgdir" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+        rmdir --ignore-fail-on-non-empty "$pkgdir/checks" 2>/dev/null || true
+        rmdir --ignore-fail-on-non-empty "$pkgdir" 2>/dev/null || true
+      done
+    done
+    ;;
+esac
+
+exit 0
+EOF
+
     stage_python_package "$pyroot"
     write_entrypoint "$root/usr/bin/whatbroke"
     cp "$REPO_DIR/README.md" "$root/usr/share/doc/$PKG_NAME/README.md"
     cp "$REPO_DIR/LICENSE" "$root/usr/share/doc/$PKG_NAME/copyright"
 
     find "$root" -type d -exec chmod 0755 {} +
-    find "$root" -type f ! -path '*/usr/bin/whatbroke' -exec chmod 0644 {} +
-    chmod 0755 "$root/usr/bin/whatbroke"
+    find "$root" -type f ! -path '*/usr/bin/whatbroke' ! -path '*/DEBIAN/postrm' -exec chmod 0644 {} +
+    chmod 0755 "$root/usr/bin/whatbroke" "$root/DEBIAN/postrm"
 
     local deb="$DIST_DIR/${PKG_NAME}_${VERSION}_all.deb"
     dpkg-deb --build "$root" "$deb" >/dev/null
