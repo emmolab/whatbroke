@@ -81,6 +81,40 @@ def _check_updates() -> dict:
 def _check_ssh_config() -> list:
     """Return list of insecure SSH setting names."""
     issues = []
+
+    if shutil.which("sshd"):
+        try:
+            proc = _run(
+                [
+                    "sshd",
+                    "-T",
+                    "-f",
+                    "/etc/ssh/sshd_config",
+                    "-C",
+                    "user=root",
+                    "-C",
+                    "host=localhost",
+                    "-C",
+                    "addr=127.0.0.1",
+                ],
+                timeout=10,
+            )
+            if proc.returncode == 0:
+                effective = {}
+                for line in proc.stdout.splitlines():
+                    stripped = line.strip().lower()
+                    if not stripped or " " not in stripped:
+                        continue
+                    key, value = stripped.split(None, 1)
+                    effective[key] = value.strip()
+                if effective.get("permitrootlogin") == "yes":
+                    issues.append("root-login")
+                if effective.get("passwordauthentication") == "yes":
+                    issues.append("password-auth")
+                return issues
+        except Exception:
+            pass
+
     cfg = "/etc/ssh/sshd_config"
     if not os.path.exists(cfg):
         return issues

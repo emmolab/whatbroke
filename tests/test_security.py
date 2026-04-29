@@ -1,7 +1,34 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, mock_open, patch
 
 from whatbroke.checks import security
+
+
+class SecuritySshConfigTests(unittest.TestCase):
+    @patch("whatbroke.checks.security.shutil.which", return_value="/usr/sbin/sshd")
+    @patch("whatbroke.checks.security._run")
+    def test_ssh_config_prefers_effective_sshd_settings(self, run_mock, _which_mock):
+        run_mock.return_value = MagicMock(
+            returncode=0,
+            stdout="permitrootlogin yes\npasswordauthentication yes\n",
+        )
+
+        issues = security._check_ssh_config()
+
+        self.assertEqual(issues, ["root-login", "password-auth"])
+        run_mock.assert_called_once()
+        self.assertEqual(run_mock.call_args.args[0][:3], ["sshd", "-T", "-f"])
+
+    @patch("whatbroke.checks.security.shutil.which", return_value="/usr/sbin/sshd")
+    @patch("whatbroke.checks.security.os.path.exists", return_value=True)
+    @patch("builtins.open", new_callable=mock_open, read_data="PermitRootLogin yes\nPasswordAuthentication yes\n")
+    @patch("whatbroke.checks.security._run")
+    def test_ssh_config_falls_back_to_file_when_sshd_t_fails(self, run_mock, _open_mock, _exists_mock, _which_mock):
+        run_mock.return_value = MagicMock(returncode=1, stdout="", stderr="bad config")
+
+        issues = security._check_ssh_config()
+
+        self.assertEqual(issues, ["root-login", "password-auth"])
 
 
 class SecurityThresholdTests(unittest.TestCase):
