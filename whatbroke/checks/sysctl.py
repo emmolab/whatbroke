@@ -86,6 +86,26 @@ def _ipv6_enabled() -> bool:
     return disabled != "1"
 
 
+def _ipv6_globally_routable_present() -> bool:
+    try:
+        with open("/proc/net/if_inet6") as f:
+            for raw in f:
+                fields = raw.split()
+                if len(fields) < 6:
+                    continue
+                addr_hex, _, _, _, _, iface = fields[:6]
+                if iface == "lo":
+                    continue
+                if addr_hex.startswith("fe80"):
+                    continue
+                if addr_hex == "0" * 32:
+                    continue
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def check() -> Result:
     """Kernel security hardening and performance sysctl parameters."""
     details = []
@@ -107,16 +127,19 @@ def check() -> Result:
 
     ipv6_enabled = _ipv6_enabled()
     if ipv6_enabled:
-        for key, expected, sev, desc in _IPV6_SECURITY_PARAMS:
-            val = _sysctl(key)
-            if val is None:
-                continue
-            if expected is not None and val != expected:
-                issues.append(f"{key} = {val}  (expected {expected}) — {desc}")
-                if sev:
-                    status = escalate(status, sev)
-            else:
-                details.append(f"{key} = {val}  OK")
+        if _ipv6_globally_routable_present():
+            for key, expected, sev, desc in _IPV6_SECURITY_PARAMS:
+                val = _sysctl(key)
+                if val is None:
+                    continue
+                if expected is not None and val != expected:
+                    issues.append(f"{key} = {val}  (expected {expected}) — {desc}")
+                    if sev:
+                        status = escalate(status, sev)
+                else:
+                    details.append(f"{key} = {val}  OK")
+        else:
+            details.append("net.ipv6: enabled, but only loopback/link-local addressing detected")
     else:
         details.append("net.ipv6: disabled or not exposed by this kernel")
 

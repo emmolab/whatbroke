@@ -5,8 +5,9 @@ from whatbroke.checks import sysctl
 
 
 class SysctlCheckTests(unittest.TestCase):
+    @patch("whatbroke.checks.sysctl._ipv6_globally_routable_present", return_value=True)
     @patch("whatbroke.checks.sysctl._sysctl")
-    def test_check_warns_on_ipv6_redirect_acceptance_when_ipv6_enabled(self, mock_sysctl):
+    def test_check_warns_on_ipv6_redirect_acceptance_when_ipv6_enabled(self, mock_sysctl, _mock_routable):
         values = {
             "kernel.randomize_va_space": "2",
             "net.ipv4.tcp_syncookies": "1",
@@ -52,6 +53,32 @@ class SysctlCheckTests(unittest.TestCase):
 
         self.assertEqual(result.status, "OK")
         self.assertIn("net.ipv6: disabled or not exposed by this kernel", result.details)
+
+    @patch("whatbroke.checks.sysctl._ipv6_globally_routable_present", return_value=False)
+    @patch("whatbroke.checks.sysctl._sysctl")
+    def test_check_skips_ipv6_redirect_warning_when_only_link_local_ipv6_present(self, mock_sysctl, _mock_routable):
+        values = {
+            "kernel.randomize_va_space": "2",
+            "net.ipv4.tcp_syncookies": "1",
+            "net.ipv4.conf.all.accept_redirects": "0",
+            "net.ipv4.conf.default.accept_redirects": "0",
+            "net.ipv6.conf.all.disable_ipv6": "0",
+            "net.ipv6.conf.all.accept_redirects": "1",
+            "net.ipv6.conf.default.accept_redirects": "1",
+            "fs.suid_dumpable": "0",
+            "kernel.dmesg_restrict": "1",
+            "kernel.kptr_restrict": "1",
+            "net.ipv4.conf.all.rp_filter": "1",
+            "vm.swappiness": "10",
+            "vm.overcommit_memory": "0",
+        }
+        mock_sysctl.side_effect = values.get
+
+        result = sysctl.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertEqual(result.message, "Kernel security parameters look reasonable (11 checked)")
+        self.assertIn("net.ipv6: enabled, but only loopback/link-local addressing detected", result.details)
 
 
 if __name__ == "__main__":
