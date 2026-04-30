@@ -27,8 +27,25 @@ def _run(cmd, timeout=10):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+def _is_ssh_failed_login_line(line: str) -> bool:
+    lowered = line.lower()
+    if not any(marker in lowered for marker in ("sshd", "dropbear")):
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "failed password",
+            "failed publickey",
+            "authentication failure",
+            "invalid user",
+            "maximum authentication attempts exceeded",
+        )
+    )
+
+
+
 def _check_failed_logins() -> tuple:
-    """Return (count, sample_lines)."""
+    """Return recent SSH failed-login count and sample lines."""
     for log in ("/var/log/auth.log", "/var/log/secure"):
         if not os.path.exists(log):
             continue
@@ -37,8 +54,8 @@ def _check_failed_logins() -> tuple:
             if proc.returncode != 0:
                 continue
             failures = [
-                l for l in proc.stdout.splitlines()
-                if "failed" in l.lower() or "authentication failure" in l.lower()
+                line for line in proc.stdout.splitlines()
+                if _is_ssh_failed_login_line(line)
             ]
             return len(failures), failures[:10]
         except Exception:

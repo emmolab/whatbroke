@@ -31,6 +31,27 @@ class SecuritySshConfigTests(unittest.TestCase):
         self.assertEqual(issues, ["root-login", "password-auth"])
 
 
+class SecurityFailedLoginParsingTests(unittest.TestCase):
+    @patch("whatbroke.checks.security.os.path.exists", return_value=True)
+    @patch("whatbroke.checks.security._run")
+    def test_failed_login_parser_counts_ssh_failures_only(self, run_mock, _exists_mock):
+        run_mock.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "Apr 30 08:00:00 host sshd[123]: Failed password for root from 1.2.3.4 port 22 ssh2\n"
+                "Apr 30 08:00:01 host sudo: pam_unix(sudo:auth): authentication failure; logname= user=alice\n"
+                "Apr 30 08:00:02 host sshd[124]: Invalid user admin from 5.6.7.8 port 22\n"
+                "Apr 30 08:00:03 host su: FAILED su for root by bob\n"
+            ),
+        )
+
+        count, samples = security._check_failed_logins()
+
+        self.assertEqual(count, 2)
+        self.assertEqual(len(samples), 2)
+        self.assertTrue(all("sshd" in sample.lower() for sample in samples))
+
+
 class SecurityThresholdTests(unittest.TestCase):
     @patch("whatbroke.checks.security._check_failed_logins", return_value=(3, []))
     @patch("whatbroke.checks.security._check_updates", return_value={"count": 8, "has_security": False})
