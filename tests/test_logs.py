@@ -5,6 +5,24 @@ from whatbroke.checks import logs
 
 
 class LogsThresholdTests(unittest.TestCase):
+    @patch(
+        "whatbroke.checks.logs._check_journal_critical",
+        return_value=([
+            "May 01 host kernel: Warning: Deprecated Hardware is detected: x86_64-v2 CPU baseline will be removed in a future major release"
+        ], []),
+    )
+    @patch("whatbroke.checks.logs._check_oom_events", return_value=[])
+    @patch("whatbroke.checks.logs._check_kernel_messages", return_value=[])
+    @patch("whatbroke.checks.logs._check_application_logs", return_value=[])
+    @patch("whatbroke.checks.logs._check_large_logs", return_value=[])
+    def test_deprecated_hardware_journal_warning_is_deferred_not_critical(self, *_mocks):
+        result = logs.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("deferred high-priority", result.message)
+        self.assertTrue(any("high-priority but non-urgent" in line for line in result.details))
+        self.assertFalse(any("critical/alert/emerg" in line for line in result.details))
+
     @patch("whatbroke.checks.logs._check_journal_critical", return_value=([], [f"err {i}" for i in range(5)]))
     @patch("whatbroke.checks.logs._check_oom_events", return_value=[])
     @patch("whatbroke.checks.logs._check_kernel_messages", return_value=[])

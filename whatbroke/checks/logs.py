@@ -12,6 +12,9 @@ _SUPPRESSED_PATTERNS = (
     re.compile(r"\bufw\b.*\bblock\b", re.IGNORECASE),
     re.compile(r"\bfinal\s+reject\b", re.IGNORECASE),
 )
+_DEFERRED_CRITICAL_PATTERNS = (
+    re.compile(r"deprecated hardware is detected", re.IGNORECASE),
+)
 
 
 def _run(cmd, timeout=15):
@@ -35,6 +38,16 @@ def _partition_noise(lines: list[str]) -> tuple[list[str], list[str]]:
         else:
             kept.append(line)
     return kept, suppressed
+
+
+def _partition_deferred_critical(lines: list[str]) -> tuple[list[str], list[str]]:
+    kept, deferred = [], []
+    for line in lines:
+        if any(pattern.search(line) for pattern in _DEFERRED_CRITICAL_PATTERNS):
+            deferred.append(line)
+        else:
+            kept.append(line)
+    return kept, deferred
 
 
 def _check_journal_critical() -> tuple:
@@ -170,12 +183,18 @@ def check() -> Result:
     remediation_parts = []
 
     critical, errors = _check_journal_critical()
+    critical, deferred_critical = _partition_deferred_critical(critical)
     errors, suppressed_journal = _partition_noise(errors)
     if critical:
         details.append(f"Journal critical/alert/emerg: {len(critical)} entries in last 24h")
         details.extend(critical[:5])
         status = escalate(status, "CRIT")
         remediation_parts.append("Inspect critical journal entries with: journalctl -p 0..2 --since '24 hours ago'")
+    elif deferred_critical:
+        details.append(f"Journal high-priority but non-urgent: {len(deferred_critical)} deferred warning(s) in last 24h")
+        details.extend(deferred_critical[:3])
+        status = escalate(status, "WARN")
+        remediation_parts.append("Review deferred high-priority kernel warnings and plan remediation before the next major platform upgrade")
     elif len(errors) >= _JOURNAL_ERROR_WARN_THRESHOLD:
         details.append(f"Journal err: {len(errors)} actionable entries in last 24h")
         details.extend(errors[:3])
@@ -245,6 +264,8 @@ def check() -> Result:
         parts = []
         if critical:
             parts.append(f"{len(critical)} critical journal entries")
+        elif deferred_critical:
+            parts.append(f"{len(deferred_critical)} deferred high-priority warning(s)")
         elif len(errors) >= _JOURNAL_ERROR_WARN_THRESHOLD:
             parts.append(f"{len(errors)} journal errors")
         if oom_events:
