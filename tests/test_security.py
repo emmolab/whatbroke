@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
 from whatbroke.checks import security
@@ -50,6 +51,21 @@ class SecurityFailedLoginParsingTests(unittest.TestCase):
         self.assertEqual(count, 2)
         self.assertEqual(len(samples), 2)
         self.assertTrue(all("sshd" in sample.lower() for sample in samples))
+
+
+class SecurityLetsEncryptHelpersTests(unittest.TestCase):
+    @patch("whatbroke.checks.security.Path.read_text", autospec=True)
+    @patch("whatbroke.checks.security.Path.exists", autospec=True)
+    def test_certbot_cron_detection_accepts_renew_job(self, exists_mock, read_text_mock):
+        cron_file = Path("/etc/cron.d/certbot")
+
+        def fake_exists(path_obj):
+            return path_obj == cron_file
+
+        exists_mock.side_effect = fake_exists
+        read_text_mock.return_value = "0 */12 * * * root certbot renew -q\n"
+
+        self.assertTrue(security._has_certbot_renewal_cron())
 
 
 class SecurityThresholdTests(unittest.TestCase):
@@ -136,6 +152,27 @@ class SecurityThresholdTests(unittest.TestCase):
         self.assertEqual(result.status, "WARN")
         self.assertIn("Let's Encrypt state to review", result.message)
         self.assertIn("certbot.timer", result.remediation)
+
+    @patch("whatbroke.checks.security.shutil.which", return_value="/bin/systemctl")
+    @patch("whatbroke.checks.security._has_certbot_renewal_cron", return_value=True)
+    @patch("whatbroke.checks.security._run")
+    @patch("whatbroke.checks.security.Path.glob", return_value=[Path("/etc/letsencrypt/renewal/example.conf")])
+    @patch("whatbroke.checks.security.Path.exists", autospec=True)
+    def test_letsencrypt_timer_warning_is_suppressed_when_cron_exists(self, exists_mock, _glob_mock, run_mock, _cron_mock, _which_mock):
+        def fake_exists(path_obj):
+            return str(path_obj) == "/etc/letsencrypt/renewal"
+
+        exists_mock.side_effect = fake_exists
+        run_mock.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=1, stdout="disabled"),
+            MagicMock(returncode=3, stdout="inactive"),
+        ]
+
+        state = security._check_letsencrypt_state()
+
+        self.assertEqual(state["issues"], [])
+        self.assertIn("cron-based renewal job exists", " ".join(state["notes"]))
 
     @patch("whatbroke.checks.security._check_failed_logins", return_value=(0, []))
     @patch("whatbroke.checks.security._check_updates", return_value={})

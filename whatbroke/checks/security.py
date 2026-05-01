@@ -245,6 +245,28 @@ def _check_expiring_certs() -> list:
     return issues
 
 
+def _has_certbot_renewal_cron() -> bool:
+    cron_paths = (
+        Path("/etc/cron.d/certbot"),
+        Path("/etc/cron.daily/certbot"),
+        Path("/etc/cron.hourly/certbot"),
+    )
+    for path in cron_paths:
+        if not path.exists():
+            continue
+        try:
+            if path.is_dir():
+                continue
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return True
+        lowered = content.lower()
+        if "certbot" in lowered and "renew" in lowered:
+            return True
+    return False
+
+
+
 def _check_letsencrypt_state() -> dict:
     """Return Let's Encrypt/Certbot context and actionable issues."""
     state = {
@@ -334,10 +356,15 @@ def _check_letsencrypt_state() -> dict:
         except Exception:
             pass
         if not (timer_enabled and timer_active):
-            state["issues"].append(
-                f"Let's Encrypt: certbot renewal timer is not fully active ({'enabled' if timer_enabled else 'disabled'}, {'active' if timer_active else 'inactive'})"
-            )
-            state["remediation"].append("Enable/start certbot.timer or provide an equivalent renewal job")
+            if _has_certbot_renewal_cron():
+                state["notes"].append(
+                    "Let's Encrypt: certbot timer is not fully active, but a cron-based renewal job exists"
+                )
+            else:
+                state["issues"].append(
+                    f"Let's Encrypt: certbot renewal timer is not fully active ({'enabled' if timer_enabled else 'disabled'}, {'active' if timer_active else 'inactive'})"
+                )
+                state["remediation"].append("Enable/start certbot.timer or provide an equivalent renewal job")
 
     if live_names and renewal_confs and len(renewal_confs) < len(live_names):
         state["issues"].append(
