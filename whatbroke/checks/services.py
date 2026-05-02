@@ -235,7 +235,7 @@ def check() -> Result:
         msg = f"No failed units, no stale zombies, {len(sockets)} listening sockets" if sockets else "No failed units or stale zombies"
     else:
         details.extend(failed_details)
-        if stale_zombies or transient_zombies:
+        if stale_zombies:
             details.extend(zombie_details)
         details.extend([issue for issue in lock_details if "transaction in progress" in issue])
         parts = []
@@ -243,8 +243,6 @@ def check() -> Result:
             parts.append(f"{len(failed)} failed unit(s)")
         if stale_zombies:
             parts.append(f"{len(stale_zombies)} stale zombie(s)")
-        elif total_zombies:
-            parts.append(f"{total_zombies} transient zombie(s)")
         if lock_issues:
             parts.append(f"{len(lock_issues)} active pkg transaction(s)")
         msg = ", ".join(parts)
