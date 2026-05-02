@@ -52,6 +52,25 @@ class SecurityFailedLoginParsingTests(unittest.TestCase):
         self.assertEqual(len(samples), 2)
         self.assertTrue(all("sshd" in sample.lower() for sample in samples))
 
+    @patch("whatbroke.checks.security.os.path.exists", return_value=False)
+    @patch("whatbroke.checks.security._run")
+    def test_failed_login_parser_falls_back_to_journalctl_when_auth_logs_absent(self, run_mock, _exists_mock):
+        run_mock.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "Apr 30 08:00:00 host sshd[123]: Failed password for root from 1.2.3.4 port 22 ssh2\n"
+                "Apr 30 08:00:01 host sshd[124]: Invalid user admin from 5.6.7.8 port 22\n"
+                "Apr 30 08:00:02 host systemd[1]: Started Session 1 of user root.\n"
+            ),
+        )
+
+        count, samples = security._check_failed_logins()
+
+        self.assertEqual(count, 2)
+        self.assertEqual(len(samples), 2)
+        self.assertTrue(all("sshd" in sample.lower() for sample in samples))
+        self.assertEqual(run_mock.call_args.args[0][:2], ["journalctl", "--since"])
+
 
 class SecurityLetsEncryptHelpersTests(unittest.TestCase):
     @patch("whatbroke.checks.security.Path.read_text", autospec=True)

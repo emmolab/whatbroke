@@ -44,8 +44,8 @@ def _is_ssh_failed_login_line(line: str) -> bool:
 
 
 
-def _check_failed_logins() -> tuple:
-    """Return recent SSH failed-login count and sample lines."""
+def _check_failed_logins_from_auth_logs() -> tuple[int, list[str]] | None:
+    """Return recent SSH failed-logins from classic auth logs, if available."""
     for log in ("/var/log/auth.log", "/var/log/secure"):
         if not os.path.exists(log):
             continue
@@ -60,7 +60,44 @@ def _check_failed_logins() -> tuple:
             return len(failures), failures[:10]
         except Exception:
             pass
+    return None
+
+
+def _check_failed_logins_from_journal() -> tuple[int, list[str]]:
+    """Return recent SSH failed-logins from journald for journal-only hosts."""
+    try:
+        proc = _run(
+            [
+                "journalctl",
+                "--since",
+                "24 hours ago",
+                "--no-pager",
+                "--output=short",
+                "-q",
+                "-t",
+                "sshd",
+                "-t",
+                "dropbear",
+            ],
+            timeout=15,
+        )
+        if proc.returncode == 0:
+            failures = [
+                line for line in proc.stdout.splitlines()
+                if _is_ssh_failed_login_line(line)
+            ]
+            return len(failures), failures[:10]
+    except Exception:
+        pass
     return 0, []
+
+
+def _check_failed_logins() -> tuple:
+    """Return recent SSH failed-login count and sample lines."""
+    from_logs = _check_failed_logins_from_auth_logs()
+    if from_logs is not None:
+        return from_logs
+    return _check_failed_logins_from_journal()
 
 
 def _check_updates() -> dict:
