@@ -9,6 +9,7 @@ class ScheduledCheckTests(unittest.TestCase):
     def test_user_cron_parser_ignores_env_comments_and_valid_macros(self):
         self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "# comment"))
         self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "PATH=/usr/local/bin:/usr/bin"))
+        self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "MAILTO="))
         self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "@daily /usr/local/bin/backup"))
         self.assertIsNone(scheduled._user_cron_issue_from_line("alice", "*/5 * * * * /usr/local/bin/check"))
 
@@ -22,8 +23,9 @@ class ScheduledCheckTests(unittest.TestCase):
     def test_system_cron_parser_ignores_env_and_comments(self):
         self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 1, "# comment"))
         self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 2, "MAILTO=root"))
-        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 3, "*/5 * * * * root /usr/local/bin/check"))
-        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 4, "@daily root /usr/local/bin/rotate"))
+        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 3, "MAILTO="))
+        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 4, "*/5 * * * * root /usr/local/bin/check"))
+        self.assertIsNone(scheduled._system_cron_issue_from_line("/etc/crontab", 5, "@daily root /usr/local/bin/rotate"))
 
     def test_system_cron_parser_flags_malformed_entries(self):
         issue = scheduled._system_cron_issue_from_line("/etc/cron.d/app", 7, "0 0 * * * /usr/local/bin/app")

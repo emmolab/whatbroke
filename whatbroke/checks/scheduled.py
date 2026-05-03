@@ -162,8 +162,8 @@ def _check_crontabs() -> list:
 def _looks_like_env_assignment(line: str) -> bool:
     if "=" not in line:
         return False
-    key, _, value = line.partition("=")
-    return bool(key.strip()) and " " not in key.strip() and bool(value.strip())
+    key, _, _value = line.partition("=")
+    return bool(key.strip()) and " " not in key.strip()
 
 
 
