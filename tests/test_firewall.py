@@ -72,6 +72,26 @@ class FirewallTests(unittest.TestCase):
         self.assertIn("ufw: installed/enabled (run with sudo to confirm live status)", result.details)
         self.assertNotIn("No active firewall rules detected", result.details)
 
+    @patch("whatbroke.checks.firewall._probe_nftables", return_value=(None, None, "nftables: installed (ruleset requires root to inspect)"))
+    @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(None, ""))
+    @patch("whatbroke.checks.firewall._probe_ufw", return_value=(None, ""))
+    def test_check_reports_unconfirmed_firewall_context_when_nftables_needs_privilege(self, *_mocks):
+        result = firewall.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertEqual(result.message, "Firewall present but live status could not be confirmed without privilege")
+        self.assertIn("nftables: installed (ruleset requires root to inspect)", result.details)
+        self.assertNotIn("No active firewall rules detected", result.details)
+
+    @patch("whatbroke.checks.firewall._run", return_value=(1, "", "Operation not permitted"))
+    @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/sbin/nft")
+    def test_probe_nftables_returns_unconfirmed_when_ruleset_requires_root(self, *_mocks):
+        active, rules, detail = firewall._probe_nftables()
+
+        self.assertIsNone(active)
+        self.assertIsNone(rules)
+        self.assertEqual(detail, "nftables: installed (ruleset requires root to inspect)")
+
 
 if __name__ == "__main__":
     unittest.main()

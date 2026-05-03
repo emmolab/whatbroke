@@ -34,13 +34,13 @@ def _ufw_enabled_in_config() -> bool:
 
 
 def _probe_nftables():
-    """Return (active: bool, rule_count: int|None, detail: str)."""
+    """Return (active: bool | None, rule_count: int|None, detail: str)."""
     if not shutil.which("nft"):
         return False, None, ""
     rc, out, err = _run(["nft", "list", "ruleset"])
     if rc != 0:
         if _needs_root(err):
-            return True, None, "nftables: installed (ruleset requires root to inspect)"
+            return None, None, "nftables: installed (ruleset requires root to inspect)"
         return False, None, ""
     lines = [l for l in out.splitlines() if l.strip() and not l.strip().startswith("#")]
     rules = sum(1 for l in lines if any(
@@ -51,13 +51,13 @@ def _probe_nftables():
 
 
 def _probe_iptables():
-    """Return (active: bool, rule_count: int|None, detail: str)."""
+    """Return (active: bool | None, rule_count: int|None, detail: str)."""
     if not shutil.which("iptables"):
         return False, None, ""
     rc, out, err = _run(["iptables", "-L", "-n", "--line-numbers"], timeout=15)
     if rc != 0:
         if _needs_root(err):
-            return True, None, "iptables: installed (requires root to inspect)"
+            return None, None, "iptables: installed (requires root to inspect)"
         return False, None, ""
     rules = sum(1 for l in out.splitlines() if l and l[0].isdigit())
     chains = [l for l in out.splitlines() if l.startswith("Chain")]
@@ -137,15 +137,17 @@ def check() -> Result:
     nft_active, nft_rules, nft_detail = _probe_nftables()
     if nft_detail:
         found_any = True
-        if nft_active:
+        if nft_active is True:
             firewall_active = True
+        elif nft_active is None:
+            firewall_unconfirmed = True
         details.append(nft_detail)
 
     # ufw
     ufw_active, ufw_detail = _probe_ufw()
     if ufw_detail:
         found_any = True
-        if ufw_active:
+        if ufw_active is True:
             firewall_active = True
         elif ufw_active is None:
             firewall_unconfirmed = True
@@ -158,7 +160,7 @@ def check() -> Result:
     fwd_active, fwd_detail = _probe_firewalld()
     if fwd_detail:
         found_any = True
-        if fwd_active:
+        if fwd_active is True:
             firewall_active = True
         if fwd_active is False:
             inactive.append(fwd_detail)
@@ -170,9 +172,11 @@ def check() -> Result:
         ipt_active, ipt_rules, ipt_detail = _probe_iptables()
         if ipt_detail:
             found_any = True
-            if ipt_active:
+            if ipt_active is True:
                 firewall_active = True
-            if ipt_active:
+                details.append(ipt_detail)
+            elif ipt_active is None:
+                firewall_unconfirmed = True
                 details.append(ipt_detail)
             else:
                 details.append(f"{ipt_detail}  (default ACCEPT, no rules)")
