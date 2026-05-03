@@ -7,6 +7,10 @@ from ..result import Result, escalate
 
 TOP_N = 5
 _LONG_UPTIME_NOTE_DAYS = 365
+_MEMORY_PRESSURE_WARN_SOME_AVG10 = 1.0
+_MEMORY_PRESSURE_BROKE_SOME_AVG10 = 5.0
+_MEMORY_PRESSURE_WARN_FULL_AVG10 = 0.1
+_MEMORY_PRESSURE_BROKE_FULL_AVG10 = 1.0
 
 
 def _run(cmd, timeout=10):
@@ -100,11 +104,38 @@ def _top_processes(sort_key: str) -> list:
         return []
 
 
+def _read_pressure(resource: str) -> dict[str, dict[str, float]]:
+    pressure = {}
+    try:
+        with open(f"/proc/pressure/{resource}") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                category = parts[0]
+                metrics = {}
+                for field in parts[1:]:
+                    if "=" not in field:
+                        continue
+                    key, value = field.split("=", 1)
+                    try:
+                        metrics[key] = float(value)
+                    except ValueError:
+                        continue
+                if metrics:
+                    pressure[category] = metrics
+    except Exception:
+        pass
+    return pressure
+
+
 def check() -> Result:
     """CPU load, memory, swap, temperatures, uptime."""
     details = []
     status = "OK"
     remediation = None
+    memory_pressure_triggered = False
 
     uptime, uptime_days = _get_uptime()
     details.append(f"Uptime: {uptime}")
@@ -156,6 +187,37 @@ def check() -> Result:
     else:
         details.append("Swap: not in use")
 
+    memory_pressure = _read_pressure("memory")
+    pressure_some = memory_pressure.get("some", {})
+    pressure_full = memory_pressure.get("full", {})
+    some_avg10 = pressure_some.get("avg10", 0.0)
+    full_avg10 = pressure_full.get("avg10", 0.0)
+
+    if full_avg10 >= _MEMORY_PRESSURE_BROKE_FULL_AVG10:
+        details.append(f"Memory pressure: full avg10 {full_avg10:.2f} — tasks are stalling in reclaim")
+        status = escalate(status, "BROKE")
+        remediation = remediation or "Investigate memory pressure with free -h, ps aux --sort=-%mem, and cgroup/container limits"
+        memory_pressure_triggered = True
+    elif some_avg10 >= _MEMORY_PRESSURE_BROKE_SOME_AVG10 and (mem_pct < 20 or swap_pct > 20):
+        details.append(f"Memory pressure: some avg10 {some_avg10:.2f} with low headroom")
+        status = escalate(status, "BROKE")
+        remediation = remediation or "Investigate memory pressure with free -h, ps aux --sort=-%mem, and cgroup/container limits"
+        memory_pressure_triggered = True
+    elif full_avg10 >= _MEMORY_PRESSURE_WARN_FULL_AVG10 or (
+        some_avg10 >= _MEMORY_PRESSURE_WARN_SOME_AVG10 and (mem_pct < 20 or swap_pct > 0)
+    ):
+        pressure_bits = []
+        if some_avg10 >= _MEMORY_PRESSURE_WARN_SOME_AVG10:
+            pressure_bits.append(f"some avg10 {some_avg10:.2f}")
+        if full_avg10 >= _MEMORY_PRESSURE_WARN_FULL_AVG10:
+            pressure_bits.append(f"full avg10 {full_avg10:.2f}")
+        details.append("Memory pressure: " + ", ".join(pressure_bits))
+        status = escalate(status, "WARN")
+        remediation = remediation or "Investigate memory pressure with free -h, ps aux --sort=-%mem, and cgroup/container limits"
+        memory_pressure_triggered = True
+    elif some_avg10 > 0 or full_avg10 > 0:
+        details.append(f"Memory pressure context: some avg10 {some_avg10:.2f}, full avg10 {full_avg10:.2f}")
+
     temps = _get_temperatures()
     crit_temps = [(n, t) for n, t in temps if t > 90]
     warn_temps = [(n, t) for n, t in temps if 80 < t <= 90]
@@ -178,7 +240,7 @@ def check() -> Result:
         details.extend(_top_processes("%cpu"))
         remediation = remediation or "Investigate high-load processes with top, htop, or systemd-cgtop"
 
-    if mem_pct < 10:
+    if mem_pct < 10 or memory_pressure_triggered:
         details.append("Top memory consumers:")
         details.extend(_top_processes("%mem"))
         remediation = remediation or "Investigate memory pressure with free -h and ps aux --sort=-%mem"
@@ -186,6 +248,8 @@ def check() -> Result:
     msg_parts = [f"Load {load1:.2f}/{cpu_count}", f"Mem {mem_pct:.0f}% free"]
     if swap_pct > 0:
         msg_parts.append(f"Swap {swap_pct:.0f}%")
+    if memory_pressure_triggered:
+        msg_parts.append(f"MemPressure {some_avg10:.1f}/{full_avg10:.1f}")
     if temps:
         msg_parts.append(f"Temp {max(t for _, t in temps):.0f}°C")
     msg_parts.append(f"Up {uptime}")
