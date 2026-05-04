@@ -98,6 +98,27 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("1 recovered", output)
 
+    def test_ok_message_drift_does_not_mark_check_as_changed(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "hardware": {"status": "OK", "message": "Hardware healthy — Load 0.20/8, Mem 90% free, Up 2d 18h 18m", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "hardware": lambda: Result("hardware", "OK", "Hardware healthy — Load 0.21/8, Mem 90% free, Up 2d 18h 19m"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args())
+            output = buf.getvalue()
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("[CHANGED]", output)
+        self.assertNotIn("changed since last run", output)
+
     def test_summary_includes_broke_counts(self):
         results = {
             "disk": lambda: Result("disk", "CRIT", "Disk full"),

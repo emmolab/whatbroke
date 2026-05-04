@@ -115,6 +115,8 @@ def _compare_state(results: list[Result], previous: dict) -> dict:
         prior_message = prior.get("message", "")
         if prior_status == r.status and prior_message == r.message:
             continue
+        if prior_status == "OK" and r.status == "OK":
+            continue
 
         changes["changed"].add(r.name)
         changes["previous"][r.name] = prior
