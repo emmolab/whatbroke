@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 
@@ -7,6 +8,15 @@ from ..result import Result, escalate
 
 def _run(cmd, timeout=10):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def _is_smart_candidate_device(device: str) -> bool:
+    """Return True for whole-disk block device names worth probing with smartctl."""
+    if re.fullmatch(r"sd[a-z]+", device):
+        return True
+    if re.fullmatch(r"nvme\d+n\d+", device):
+        return True
+    return False
 
 
 def _get_disk_usage():
@@ -84,15 +94,7 @@ def _check_smart_health():
         return issues
     try:
         for device in sorted(os.listdir('/dev/')):
-            if device.startswith('sd'):
-                # sda, sdb … are whole disks; sda1, sda2 … are partitions — skip them
-                if len(device) != 3 or not device[2].isalpha():
-                    continue
-            elif device.startswith('nvme'):
-                # nvme0n1 is a whole disk; nvme0n1p1 is a partition — skip partitions
-                if 'p' in device.split('n')[-1]:
-                    continue
-            else:
+            if not _is_smart_candidate_device(device):
                 continue
             dev_path = f'/dev/{device}'
             try:
