@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 
 from ..result import Result, escalate
@@ -27,8 +28,7 @@ def _detect_mta() -> str | None:
         rc, _, _ = _run(["systemctl", "cat", name + ".service"])
         if rc == 0:
             return name
-        rc2, _, _ = _run(["which", name])
-        if rc2 == 0:
+        if shutil.which(name):
             return name
     return None
 
@@ -62,17 +62,26 @@ def _exim_queue_size() -> int | None:
 
 
 def _opensmtpd_queue_size() -> int | None:
+    rc, out, _ = _run(["smtpctl", "show", "queue"])
+    if rc == 0:
+        queue_lines = [line for line in out.splitlines() if line.strip()]
+        return len(queue_lines)
+    if rc == -1:
+        return None
+
     rc, out, _ = _run(["smtpctl", "show", "stats"])
     if rc == -1:
         return None
     total = 0
+    saw_counter = False
     for line in out.splitlines():
         if "scheduler.envelope" in line and "incoming" not in line:
             try:
                 total += int(line.split("=")[-1].strip())
+                saw_counter = True
             except ValueError:
                 pass
-    return total or None
+    return total if saw_counter else None
 
 
 def _mailq_count() -> int | None:
@@ -100,9 +109,33 @@ def _queue_size(mta: str) -> int | None:
     if mta in ("exim4", "exim"):
         return _exim_queue_size()
     if mta == "opensmtpd":
-        return _opensmtpd_queue_size()
+        queue = _opensmtpd_queue_size()
+        return queue if queue is not None else _mailq_count()
     # postfix and sendmail both expose mailq
     return _mailq_count()
+
+
+def _remediation_for_mta(mta: str) -> str:
+    log_unit = "smtpd" if mta == "opensmtpd" else mta
+    inspect_queue = {
+        "postfix": "mailq",
+        "sendmail": "mailq",
+        "exim4": "exim -bp",
+        "exim": "exim -bp",
+        "opensmtpd": "smtpctl show queue",
+    }.get(mta, "mailq")
+    flush_queue = {
+        "postfix": "postfix flush",
+        "sendmail": "sendmail -q",
+        "exim4": "exim -qff",
+        "exim": "exim -qff",
+        "opensmtpd": "smtpctl schedule all",
+    }.get(mta, "mailq")
+    return (
+        f"Check '{log_unit}' logs: journalctl -u {log_unit} -n 50\n"
+        f"  Inspect queue: {inspect_queue}\n"
+        f"  Flush queue:   {flush_queue}"
+    )
 
 
 # ── Main check ───────────────────────────────────────────────────────────────
@@ -138,7 +171,7 @@ def check() -> Result:
     # Queue depth
     queue = _queue_size(mta)
     if queue is None:
-        details.append("Queue size: unknown (mailq not accessible)")
+        details.append("Queue size: unknown (queue inspection command unavailable or unreadable)")
     elif queue >= _CRIT_THRESHOLD:
         issues.append(f"Mail queue critically large: {queue} messages (>= {_CRIT_THRESHOLD})")
         status = escalate(status, "CRIT")
@@ -161,9 +194,5 @@ def check() -> Result:
         status=status,
         message=msg,
         details=all_details,
-        remediation=(
-            f"Check '{mta}' logs: journalctl -u {mta} -n 50\n"
-            "  Inspect queue: mailq\n"
-            "  Flush queue:   postfix flush  (or: sendmail -q)"
-        ) if status != "OK" else None,
+        remediation=_remediation_for_mta(mta) if status != "OK" else None,
     )
