@@ -71,6 +71,8 @@ class FirewallTests(unittest.TestCase):
         self.assertEqual(result.message, "Firewall present but live status could not be confirmed without privilege")
         self.assertIn("ufw: installed/enabled (run with sudo to confirm live status)", result.details)
         self.assertNotIn("No active firewall rules detected", result.details)
+        self.assertIn("Re-run with sudo before changing firewall state", result.remediation)
+        self.assertIn("sudo ufw status verbose", result.remediation)
 
     @patch("whatbroke.checks.firewall._probe_nftables", return_value=(None, None, "nftables: installed (ruleset requires root to inspect)"))
     @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(None, ""))
@@ -82,6 +84,8 @@ class FirewallTests(unittest.TestCase):
         self.assertEqual(result.message, "Firewall present but live status could not be confirmed without privilege")
         self.assertIn("nftables: installed (ruleset requires root to inspect)", result.details)
         self.assertNotIn("No active firewall rules detected", result.details)
+        self.assertIn("Re-run with sudo before changing firewall state", result.remediation)
+        self.assertIn("sudo nft list ruleset", result.remediation)
 
     @patch("whatbroke.checks.firewall._run", return_value=(1, "", "Operation not permitted"))
     @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/sbin/nft")

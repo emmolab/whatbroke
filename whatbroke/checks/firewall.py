@@ -189,12 +189,25 @@ def check() -> Result:
             remediation="Install and enable a firewall: nftables, ufw, or firewalld",
         )
 
+    remediation = None
     if not firewall_active:
         status = escalate(status, "WARN")
         if firewall_unconfirmed:
             issues.insert(0, "Firewall present but live status could not be confirmed without privilege")
+            remediation = (
+                "Re-run with sudo before changing firewall state:\n"
+                "  nftables:  sudo nft list ruleset\n"
+                "  ufw:       sudo ufw status verbose\n"
+                "If no live firewall is confirmed, then enable one backend deliberately."
+            )
         else:
             issues.insert(0, "No active firewall rules detected")
+            remediation = (
+                "Enable a firewall:\n"
+                "  nftables:  systemctl enable --now nftables\n"
+                "  ufw:       ufw enable\n"
+                "  firewalld: systemctl enable --now firewalld"
+            )
         issues.extend(inactive)
     else:
         details.extend(f"{line}  (inactive backend, another firewall appears active)" for line in inactive)
@@ -211,10 +224,5 @@ def check() -> Result:
         status=status,
         message=msg,
         details=all_details,
-        remediation=(
-            "Enable a firewall:\n"
-            "  nftables:  systemctl enable --now nftables\n"
-            "  ufw:       ufw enable\n"
-            "  firewalld: systemctl enable --now firewalld"
-        ) if status != "OK" else None,
+        remediation=remediation,
     )
