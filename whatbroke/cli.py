@@ -196,6 +196,23 @@ def _transition_tag(name: str, changes: dict) -> str:
     return f" {Colors.BOLD}{Colors.CYAN}[{label}]{Colors.END}"
 
 
+def _remediation_hint(remediation: str) -> str | None:
+    lines = [line.strip() for line in remediation.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    first = lines[0]
+    if first.endswith(":") and len(lines) > 1:
+        follow_up = lines[1]
+        if ":" in follow_up:
+            _label, candidate = follow_up.split(":", 1)
+            if candidate.strip():
+                follow_up = candidate.strip()
+        return f"{first} {follow_up}".replace(" :", ":")
+
+    return first
+
+
 def _result_hint(r: Result) -> str | None:
     if r.status == "OK":
         return None
@@ -204,7 +221,7 @@ def _result_hint(r: Result) -> str | None:
 
     next_step = None
     if r.remediation:
-        next_step = next((line.strip() for line in r.remediation.splitlines() if line.strip()), None)
+        next_step = _remediation_hint(r.remediation)
 
     if next_step:
         return f"Next: {next_step}"

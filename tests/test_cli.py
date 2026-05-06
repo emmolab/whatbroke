@@ -48,6 +48,35 @@ class CliStateAndHintsTests(unittest.TestCase):
 
         self.assertEqual(hint, "Next: Free space on /.")
 
+    def test_result_hint_combines_intro_line_with_first_actionable_command(self):
+        hint = _result_hint(Result(
+            name="firewall",
+            status="WARN",
+            message="Firewall status unclear",
+            remediation=(
+                "Re-run with sudo before changing firewall state:\n"
+                "  nftables:  sudo nft list ruleset\n"
+                "  ufw:       sudo ufw status verbose\n"
+                "If no live firewall is confirmed, then enable one backend deliberately."
+            ),
+        ))
+
+        self.assertEqual(hint, "Next: Re-run with sudo before changing firewall state: sudo nft list ruleset")
+
+    def test_result_hint_keeps_first_follow_up_line_when_no_backend_label_exists(self):
+        hint = _result_hint(Result(
+            name="firewall",
+            status="WARN",
+            message="No active firewall rules detected",
+            remediation=(
+                "Enable a firewall:\n"
+                "  systemctl enable --now nftables\n"
+                "Or choose ufw/firewalld if that better fits the host."
+            ),
+        ))
+
+        self.assertEqual(hint, "Next: Enable a firewall: systemctl enable --now nftables")
+
     def test_diff_reports_worsened_and_changed_broken_checks(self):
         previous_state = {
             "updated_at": "2026-04-11T00:00:00+00:00",
