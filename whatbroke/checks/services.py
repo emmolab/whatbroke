@@ -163,6 +163,25 @@ def _check_listening_ports() -> list:
     return sockets
 
 
+def _check_package_health() -> tuple[list[str], list[str]]:
+    """Detect conservative package-manager broken-state signals."""
+    issues = []
+    remediation = []
+
+    if shutil.which("dpkg"):
+        try:
+            proc = _run(["dpkg", "--audit"], timeout=20)
+            audit_output = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+            if audit_output:
+                issues.append("dpkg audit reports packages needing repair/configuration")
+                issues.extend(f"  {line}" for line in audit_output[:5])
+                remediation.append("Repair package state with: sudo dpkg --configure -a && sudo apt -f install")
+        except Exception:
+            pass
+
+    return issues, remediation
+
+
 def check() -> Result:
     """Systemd failed units, zombie processes, package manager locks."""
     details = []
@@ -224,6 +243,13 @@ def check() -> Result:
         status = escalate(status, "WARN")
     remediation_parts.extend(lock_remediation)
 
+    package_issues, package_remediation = _check_package_health()
+    package_details = []
+    if package_issues:
+        package_details.extend(package_issues)
+        status = escalate(status, "BROKE")
+        remediation_parts.extend(package_remediation)
+
     sockets = _check_listening_ports()
     socket_details = [f"Listening sockets: {len(sockets)}"] if sockets else ["Listening sockets: unable to enumerate (ss/netstat not found)"]
 
@@ -231,6 +257,7 @@ def check() -> Result:
         details.extend(failed_details)
         details.extend(zombie_details)
         details.extend(lock_details)
+        details.extend(package_details)
         details.extend(socket_details)
         msg = f"No failed units, no stale zombies, {len(sockets)} listening sockets" if sockets else "No failed units or stale zombies"
     else:
@@ -238,6 +265,8 @@ def check() -> Result:
         if stale_zombies:
             details.extend(zombie_details)
         details.extend([issue for issue in lock_details if "transaction in progress" in issue])
+        if package_issues:
+            details.extend(package_details[:6])
         parts = []
         if failed:
             parts.append(f"{len(failed)} failed unit(s)")
@@ -245,6 +274,8 @@ def check() -> Result:
             parts.append(f"{len(stale_zombies)} stale zombie(s)")
         if lock_issues:
             parts.append(f"{len(lock_issues)} active pkg transaction(s)")
+        if package_issues:
+            parts.append("package state needs repair")
         msg = ", ".join(parts)
 
     remediation = "\n".join(dict.fromkeys(remediation_parts)) if status != "OK" and remediation_parts else None
