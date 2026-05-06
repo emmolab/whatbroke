@@ -96,6 +96,32 @@ class FirewallTests(unittest.TestCase):
         self.assertIsNone(rules)
         self.assertEqual(detail, "nftables: installed (ruleset requires root to inspect)")
 
+    @patch("whatbroke.checks.firewall._service_active", return_value=True)
+    @patch("whatbroke.checks.firewall.shutil.which", return_value=None)
+    def test_probe_firewalld_reports_unconfirmed_when_service_is_active_but_cli_missing(self, *_mocks):
+        active, detail = firewall._probe_firewalld()
+
+        self.assertIsNone(active)
+        self.assertEqual(detail, "firewalld: service active (firewall-cmd unavailable to confirm state)")
+
+    @patch("whatbroke.checks.firewall._service_active", return_value=True)
+    @patch("whatbroke.checks.firewall._run", return_value=(1, "", "Failed to connect to socket /run/dbus/system_bus_socket: Permission denied"))
+    @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/bin/firewall-cmd")
+    def test_probe_firewalld_reports_unconfirmed_when_state_lookup_needs_privilege(self, *_mocks):
+        active, detail = firewall._probe_firewalld()
+
+        self.assertIsNone(active)
+        self.assertEqual(detail, "firewalld: service active (run with sudo to confirm daemon state)")
+
+    @patch("whatbroke.checks.firewall._service_active", return_value=True)
+    @patch("whatbroke.checks.firewall._run", return_value=(1, "not running\n", ""))
+    @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/bin/firewall-cmd")
+    def test_probe_firewalld_reports_unconfirmed_when_service_is_active_but_state_lookup_fails(self, *_mocks):
+        active, detail = firewall._probe_firewalld()
+
+        self.assertIsNone(active)
+        self.assertEqual(detail, "firewalld: service active (daemon state lookup failed)")
+
 
 if __name__ == "__main__":
     unittest.main()

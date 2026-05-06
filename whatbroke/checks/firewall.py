@@ -108,16 +108,24 @@ def _probe_ufw():
 
 
 def _probe_firewalld():
-    """Return (active: bool, detail: str) or None if firewalld not present."""
+    """Return (active: bool | None, detail: str) or None if firewalld not present."""
     if not _service_active("firewalld"):
         # Check if installed but not running
         rc, _, _ = _run(["systemctl", "cat", "firewalld.service"])
         if rc != 0:
             return None, ""
         return False, "firewalld: installed but not running"
-    rc, out, _ = _run(["firewall-cmd", "--state"])
-    active = rc == 0 and "running" in out.lower()
-    return active, f"firewalld: {'running' if active else 'not running'}"
+
+    if not shutil.which("firewall-cmd"):
+        return None, "firewalld: service active (firewall-cmd unavailable to confirm state)"
+
+    rc, out, err = _run(["firewall-cmd", "--state"])
+    state = out.strip().lower()
+    if rc == 0 and "running" in state:
+        return True, "firewalld: running"
+    if _needs_root(f"{out}\n{err}"):
+        return None, "firewalld: service active (run with sudo to confirm daemon state)"
+    return None, "firewalld: service active (daemon state lookup failed)"
 
 
 # ── Main check ────────────────────────────────────────────────────────────────
