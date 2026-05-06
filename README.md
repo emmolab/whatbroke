@@ -76,7 +76,7 @@ Results are sorted worst-first (CRIT → WARN → OK).
 | Check | What it looks at |
 |-------|-----------------|
 | `disk` | Filesystem usage (>80% WARN, >90% CRIT), inodes, SMART health, RAID/LVM degradation, read-only remounts caused by I/O errors |
-| `hardware` | CPU load, memory, swap, temperatures, uptime context |
+| `hardware` | CPU load, memory, swap, Linux memory pressure (PSI), temperatures, uptime context |
 | `services` | Failed systemd units, stale zombie processes, package manager lock files |
 | `logs` | Critical journal entries, repeated error storms, kernel/OOM events |
 | `networking` | Default route, gateway reachability, DNS sanity, outbound HTTPS, NTP sync, NIC errors and drops |
@@ -420,6 +420,7 @@ Recent behavior changes in `0.3.2`:
 - scheduled-task detection now ignores disabled/backup cron drop-ins and non-executable run-parts files, reducing cron false positives
 - ordinary low-volume journal/kernel noise is de-emphasised; repeated storms and severe events still alert loudly
 - hardware thresholds are less jumpy on long-lived servers
+- hardware checks now use Linux PSI memory pressure signals to surface reclaim stalls and sustained memory stress before a host falls over completely
 - non-OK results now include a terse `Next:` line in the pretty output to make triage faster under pressure
 - baseline state now tracks all checks, so `--diff` can surface worsened or otherwise changed failures and the main summary can call out recovered checks
 
