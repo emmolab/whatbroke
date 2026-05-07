@@ -43,11 +43,12 @@ class ServicesZombieTests(unittest.TestCase):
     @patch("whatbroke.checks.services._check_pkg_manager_locks", return_value=([], ["Ignoring idle apt lock file: /var/lib/dpkg/lock-frontend"], []))
     @patch("whatbroke.checks.services._check_package_health", return_value=([], []))
     @patch("whatbroke.checks.services._check_listening_ports", return_value=[])
-    def test_idle_apt_lock_file_is_not_alerted(self, *_mocks):
+    def test_idle_apt_lock_file_is_summarized_without_noise(self, *_mocks):
         result = services.check()
 
         self.assertEqual(result.status, "OK")
-        self.assertIn("Ignoring idle apt lock file", " ".join(result.details))
+        self.assertIn("Package manager locks: none active", result.details)
+        self.assertNotIn("Ignoring idle apt lock file", " ".join(result.details))
 
     @patch("whatbroke.checks.services._check_failed_systemd_services", return_value=["cron.service"])
     @patch("whatbroke.checks.services._check_zombie_processes", return_value={"all": [], "stale": [], "transient": [], "parent_counts": {}, "commands": {}, "oldest": []})

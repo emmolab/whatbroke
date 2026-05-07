@@ -237,10 +237,12 @@ def check() -> Result:
         zombie_details.append("Processes: no zombies")
 
     lock_issues, lock_notes, lock_remediation = _check_pkg_manager_locks()
-    lock_details = list(lock_notes)
-    for issue in lock_issues:
-        lock_details.append(issue)
+    lock_details = []
+    if lock_issues:
+        lock_details.extend(lock_issues)
         status = escalate(status, "WARN")
+    elif lock_notes:
+        lock_details.append("Package manager locks: none active")
     remediation_parts.extend(lock_remediation)
 
     package_issues, package_remediation = _check_package_health()
