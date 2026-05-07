@@ -1,5 +1,6 @@
 import os
 import pwd
+import re
 import subprocess
 
 from ..result import Result, escalate
@@ -159,11 +160,11 @@ def _check_crontabs() -> list:
     return issues
 
 
+_CRON_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s*=.*$")
+
+
 def _looks_like_env_assignment(line: str) -> bool:
-    if "=" not in line:
-        return False
-    key, _, _value = line.partition("=")
-    return bool(key.strip()) and " " not in key.strip()
+    return bool(_CRON_ENV_ASSIGNMENT_RE.match(line.strip()))
 
 
 
