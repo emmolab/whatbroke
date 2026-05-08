@@ -149,7 +149,10 @@ whatbroke --diff
 whatbroke --compact
 
 # JSON output — pipe into jq, monitoring systems, etc.
-whatbroke --json | jq '.[] | select(.status != "OK")'
+whatbroke --json | jq '.[] | select(.status == "CRIT") | {name, message, remediation}'
+
+# Nagios/Icinga-compatible plugin output and exit codes
+whatbroke --nagios
 ```
 
 ### Suppress output
@@ -192,7 +195,10 @@ Because `--diff` outputs nothing when there are no changed broken checks, this o
 
 ### Monitoring system integration
 ```bash
-# Nagios/Icinga-compatible exit codes
+# Nagios/Icinga-compatible plugin output (0=OK, 1=WARNING, 2=CRITICAL, 3=UNKNOWN)
+whatbroke --nagios
+
+# whatbroke-native exit codes remain available for simple scripts
 whatbroke --only disk,hardware --compact
 echo "Exit: $?"
 ```
@@ -241,6 +247,7 @@ Output:
   -v, --verbose      Show details and remediation hints
   --compact          One line per broken check (script-friendly)
   --json             JSON array output
+  --nagios           Nagios/Icinga plugin output (single line + plugin exit codes)
   --no-color         Disable ANSI colours
 
 Filtering:
@@ -404,6 +411,14 @@ curl -fsSL https://raw.githubusercontent.com/emmolab/whatbroke/main/install.sh |
 - transient noise should stay informational where possible
 - repeated or clearly actionable failures should rise to WARN/BROKE/CRIT
 - output should help an on-call Linux admin decide what to inspect next
+
+Recent behavior changes in `0.3.4`:
+- added `--nagios` for Nagios/Icinga plugin-style monitoring: one-line status output, perfdata counters, and plugin-compatible exit codes
+- documented the monitoring integration path so sysadmins can drop whatbroke into existing checks without wrapping JSON themselves
+
+Recent behavior changes in `0.3.3`:
+- RPM packages now install the Python modules into the runtime site-packages path, resolving `ModuleNotFoundError` on RPM-family hosts
+- packaged Python bytecode caches are excluded from release artifacts, keeping packages cleaner and reproducible
 
 Recent behavior changes in `0.3.2`:
 - the runtime banner is now plain and terminal-safe instead of relying on wide ASCII art

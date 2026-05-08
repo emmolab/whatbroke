@@ -230,6 +230,48 @@ def _result_hint(r: Result) -> str | None:
     return None
 
 
+def _nagios_code(status: str) -> int:
+    """Map whatbroke's status model onto Nagios-compatible plugin codes."""
+    if status == "OK":
+        return 0
+    if status == "WARN":
+        return 1
+    return 2
+
+
+def _nagios_label(status: str) -> str:
+    if status == "OK":
+        return "OK"
+    if status == "WARN":
+        return "WARNING"
+    return "CRITICAL"
+
+
+def _format_nagios(results: list[Result], worst: str, elapsed: float) -> str:
+    """Return a single-line Nagios/Icinga-compatible plugin response."""
+    counts = {status: sum(1 for r in results if r.status == status) for status in SEVERITY}
+    broken = [r for r in results if r.status != "OK"]
+
+    if broken:
+        summary = ", ".join(
+            f"{r.name}:{r.status} {r.message}" for r in broken[:3]
+        )
+        if len(broken) > 3:
+            summary += f", +{len(broken) - 3} more"
+    else:
+        summary = f"all {len(results)} checks OK"
+
+    perfdata = (
+        f"checks={len(results)};;;0; "
+        f"ok={counts['OK']};;;0; "
+        f"warn={counts['WARN']};;;0; "
+        f"broke={counts['BROKE']};;;0; "
+        f"crit={counts['CRIT']};;;0; "
+        f"elapsed={elapsed:.3f}s;;;0;"
+    )
+    return f"WHATBROKE {_nagios_label(worst)} - {summary} | {perfdata}"
+
+
 def _print_result(r: Result, verbose: bool, changes: dict | None = None) -> None:
     c = _color(r.status)
     tag = _transition_tag(r.name, changes or {"new": set(), "worsened": set(), "improved": set(), "resolved": set(), "changed": set()})
@@ -283,6 +325,8 @@ def main() -> None:
                    help="Only show checks that are not OK")
     p.add_argument("--json", action="store_true",
                    help="Output results as JSON")
+    p.add_argument("--nagios", action="store_true",
+                   help="Single-line Nagios/Icinga plugin output with compatible exit codes")
     p.add_argument("--no-color", action="store_true",
                    help="Disable ANSI colour output")
 
@@ -370,14 +414,18 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     if watch_interval is not None:
         print(Colors.CLEAR, end="")
 
-    show_banner = not args.compact and not args.json
+    show_banner = not args.compact and not args.json and not args.nagios
     if show_banner and watch_interval is None:
         _print_header()
 
     if not checks:
         if args.json:
             print("[]")
-        elif args.compact:
+            return 0
+        if args.nagios:
+            print("WHATBROKE UNKNOWN - no checks selected | checks=0;;;0;")
+            return 3
+        if args.compact:
             print("No checks selected")
         else:
             if watch_interval is not None:
@@ -405,6 +453,11 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     if not args.no_state:
         previous_state = _load_state()
         changes = _save_state(results, previous_state)
+
+    # ── Nagios / Icinga plugin output ─────────────────────────────────────────
+    if args.nagios:
+        print(_format_nagios(results, worst, elapsed))
+        return _nagios_code(worst)
 
     # ── compact ───────────────────────────────────────────────────────────────
     if args.compact:

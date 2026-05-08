@@ -19,6 +19,7 @@ class CliStateAndHintsTests(unittest.TestCase):
             "verbose": False,
             "broken_only": False,
             "json": False,
+            "nagios": False,
             "no_color": True,
             "no_state": False,
             "diff": False,
@@ -180,6 +181,32 @@ class CliStateAndHintsTests(unittest.TestCase):
 
         self.assertEqual(code, 3)
         self.assertEqual([item["name"] for item in payload], ["disk"])
+
+    def test_nagios_output_uses_single_line_and_plugin_exit_code(self):
+        results = {
+            "disk": lambda: Result("disk", "CRIT", "Disk full"),
+            "logs": lambda: Result("logs", "WARN", "Recent errors"),
+            "security": lambda: Result("security", "OK", "Healthy"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(nagios=True))
+            output = buf.getvalue().strip()
+
+        self.assertEqual(code, 2)
+        self.assertTrue(output.startswith("WHATBROKE CRITICAL - disk:CRIT Disk full, logs:WARN Recent errors |"))
+        self.assertIn("checks=3;;;0;", output)
+        self.assertIn("crit=1;;;0;", output)
+
+    def test_nagios_empty_selection_reports_unknown(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = _run_single({}, self._args(nagios=True))
+
+        self.assertEqual(code, 3)
+        self.assertEqual(buf.getvalue().strip(), "WHATBROKE UNKNOWN - no checks selected | checks=0;;;0;")
 
     def test_run_single_handles_empty_check_selection(self):
         buf = io.StringIO()
