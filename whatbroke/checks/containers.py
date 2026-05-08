@@ -249,6 +249,8 @@ def check() -> Result:
         parts = []
         if exited:
             parts.append(f"{len(exited)} exited containers")
+        if restarting:
+            parts.append(f"{len(restarting)} restarting container(s)")
         if k8s_issues:
             parts.append(f"{len(k8s_issues)} k8s issue(s)")
         if vm_issues:

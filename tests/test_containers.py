@@ -52,9 +52,22 @@ class ContainersTests(unittest.TestCase):
         result = containers.check()
 
         self.assertEqual(result.status, "WARN")
+        self.assertIn("1 exited containers", result.message)
         self.assertIn("Inspect failed docker containers first", result.remediation)
         self.assertIn("Remove exited containers only after confirming", result.remediation)
         self.assertNotIn("docker rm $(docker ps -aq -f status=exited)", result.remediation)
+
+    @patch("whatbroke.checks.containers._check_libvirt", return_value=([], []))
+    @patch("whatbroke.checks.containers._check_kubernetes", return_value=[])
+    @patch("whatbroke.checks.containers._get_restarting_containers", return_value=["docker:api [abc123] — Restarting (restarts: 7) — image: myapp:latest"])
+    @patch("whatbroke.checks.containers._get_exited_containers", return_value=[])
+    @patch("whatbroke.checks.containers._runtime_available", side_effect=lambda runtime: runtime == "docker")
+    def test_check_surfaces_restart_loops_in_summary_message(self, *_mocks):
+        result = containers.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertIn("1 restarting container(s)", result.message)
+        self.assertIn("Inspect docker restart loops", result.remediation)
 
     @patch("whatbroke.checks.containers._check_libvirt", return_value=(["VM api-vm: paused"], []))
     @patch("whatbroke.checks.containers._check_kubernetes", return_value=["Node node-1: NotReady"])
