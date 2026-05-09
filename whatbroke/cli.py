@@ -40,6 +40,17 @@ def _disable_colors() -> None:
             setattr(Colors, attr, '')
 
 
+def _stdout_supports_color(stream=None) -> bool:
+    stream = stream or sys.stdout
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except Exception:
+        return False
+
+
 _BANNER = (
     "WhatBroke\n"
     "Find what's broken. Fix what matters.\n"
@@ -346,7 +357,7 @@ def main() -> None:
 
     args = p.parse_args()
 
-    if args.no_color:
+    if args.no_color or not _stdout_supports_color():
         _disable_colors()
 
     checks = discover_checks()

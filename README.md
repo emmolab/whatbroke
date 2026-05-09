@@ -158,6 +158,7 @@ whatbroke --nagios
 ### Suppress output
 ```bash
 # No ANSI colours (log files, terminals without colour support)
+# Non-interactive output auto-disables colour too; this flag just makes it explicit.
 whatbroke --no-color
 
 # Skip a noisy check

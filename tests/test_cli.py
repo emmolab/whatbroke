@@ -8,8 +8,20 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from whatbroke.cli import _load_state, _parse_check_filter, _result_hint, _run_single, main
+from whatbroke.cli import _load_state, _parse_check_filter, _result_hint, _run_single, _stdout_supports_color, main
 from whatbroke.result import Result
+
+
+class CliColorDetectionTests(unittest.TestCase):
+    def test_stdout_supports_color_when_stream_is_tty(self):
+        stream = SimpleNamespace(isatty=lambda: True)
+
+        self.assertTrue(_stdout_supports_color(stream))
+
+    def test_stdout_supports_color_returns_false_for_non_tty_streams(self):
+        stream = SimpleNamespace(isatty=lambda: False)
+
+        self.assertFalse(_stdout_supports_color(stream))
 
 
 class CliStateAndHintsTests(unittest.TestCase):
@@ -375,6 +387,17 @@ class CliFilterParsingTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 0)
         self.assertIn("No checks selected.", buf.getvalue())
+
+    def test_main_auto_disables_color_for_non_tty_compact_output(self):
+        with patch("whatbroke.cli.discover_checks", return_value={"firewall": lambda: Result("firewall", "WARN", "Firewall status unclear")}), \
+             patch("sys.argv", ["whatbroke", "--compact", "--no-state"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(buf.getvalue().strip(), "firewall:WARN Firewall status unclear")
+        self.assertNotIn("\x1b", buf.getvalue())
 
 
 if __name__ == "__main__":
