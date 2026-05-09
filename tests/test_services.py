@@ -83,9 +83,9 @@ class ServicesZombieTests(unittest.TestCase):
         self.assertTrue(any("transaction in progress" in issue for issue in issues))
         self.assertTrue(any("Wait for the active" in item for item in remediation))
 
-    @patch("whatbroke.checks.services.shutil.which", side_effect=lambda tool: "/usr/bin/dpkg" if tool == "dpkg" else None)
+    @patch("whatbroke.checks.services._detect_package_kind", return_value="deb")
     @patch("whatbroke.checks.services._run")
-    def test_dpkg_audit_issues_raise_package_health_warning(self, run_mock, _which_mock):
+    def test_dpkg_audit_issues_raise_package_health_warning(self, run_mock, _detect_mock):
         run_mock.return_value.stdout = "The following packages are only half configured\n package-a\n"
         run_mock.return_value.returncode = 0
 
@@ -93,6 +93,26 @@ class ServicesZombieTests(unittest.TestCase):
 
         self.assertIn("dpkg audit reports packages needing repair/configuration", issues[0])
         self.assertTrue(any("dpkg --configure -a" in item for item in remediation))
+
+    @patch("whatbroke.checks.services.shutil.which")
+    @patch("whatbroke.checks.services._read_os_release_tokens", return_value={"fedora"})
+    def test_detect_package_kind_prefers_rpm_on_mixed_tool_hosts(self, _tokens_mock, which_mock):
+        which_mock.side_effect = lambda tool: {
+            "rpm": "/usr/bin/rpm",
+            "dpkg": "/usr/bin/dpkg",
+            "apt-get": "/usr/bin/apt-get",
+        }.get(tool)
+
+        self.assertEqual(services._detect_package_kind(), "rpm")
+
+    @patch("whatbroke.checks.services._detect_package_kind", return_value="rpm")
+    @patch("whatbroke.checks.services._run")
+    def test_package_health_skips_dpkg_audit_on_rpm_hosts(self, run_mock, _detect_mock):
+        issues, remediation = services._check_package_health()
+
+        self.assertEqual(issues, [])
+        self.assertEqual(remediation, [])
+        run_mock.assert_not_called()
 
     @patch("whatbroke.checks.services._check_failed_systemd_services", return_value=[])
     @patch("whatbroke.checks.services._check_zombie_processes", return_value={"all": [], "stale": [], "transient": [], "parent_counts": {}, "commands": {}, "oldest": []})

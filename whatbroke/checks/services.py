@@ -1,4 +1,5 @@
 import os
+import pathlib
 import shutil
 import subprocess
 from collections import Counter
@@ -163,12 +164,50 @@ def _check_listening_ports() -> list:
     return sockets
 
 
+def _read_os_release_tokens() -> set[str]:
+    tokens: set[str] = set()
+    path = pathlib.Path("/etc/os-release")
+    try:
+        for line in path.read_text().splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key not in {"ID", "ID_LIKE"}:
+                continue
+            tokens.update(part for part in value.strip().strip('"').lower().split() if part)
+    except OSError:
+        pass
+    return tokens
+
+
+def _detect_package_kind() -> str | None:
+    """Best-effort host package family detection that avoids mixed-tool false positives."""
+    tokens = _read_os_release_tokens()
+
+    rpm_families = {"rhel", "fedora", "centos", "rocky", "alma", "suse", "opensuse"}
+    deb_families = {"debian", "ubuntu"}
+
+    if tokens & rpm_families and shutil.which("rpm"):
+        return "rpm"
+    if tokens & deb_families and shutil.which("dpkg"):
+        return "deb"
+    if any(shutil.which(tool) for tool in ("dnf", "yum", "zypper")):
+        return "rpm"
+    if shutil.which("apt-get"):
+        return "deb"
+    if shutil.which("rpm"):
+        return "rpm"
+    if shutil.which("dpkg"):
+        return "deb"
+    return None
+
+
 def _check_package_health() -> tuple[list[str], list[str]]:
     """Detect conservative package-manager broken-state signals."""
     issues = []
     remediation = []
 
-    if shutil.which("dpkg"):
+    if _detect_package_kind() == "deb":
         try:
             proc = _run(["dpkg", "--audit"], timeout=20)
             audit_output = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
