@@ -224,5 +224,41 @@ class SecurityThresholdTests(unittest.TestCase):
         self.assertIn("Reboot status: no explicit reboot-required signal detected", result.details)
 
 
+class SecurityPackageManagerDetectionTests(unittest.TestCase):
+    @patch("whatbroke.checks.security._detect_package_kind", return_value="rpm")
+    @patch("whatbroke.checks.security.shutil.which")
+    @patch("whatbroke.checks.security._run")
+    def test_update_check_skips_apt_on_mixed_tool_rpm_hosts(self, run_mock, which_mock, _detect_mock):
+        which_mock.side_effect = lambda tool: {
+            "apt": "/usr/bin/apt",
+            "dnf": "/usr/bin/dnf",
+        }.get(tool)
+        run_mock.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        security._check_updates()
+
+        self.assertTrue(run_mock.called)
+        self.assertEqual(run_mock.call_args.args[0][0], "dnf")
+
+    @patch("whatbroke.checks.security._detect_package_kind", return_value="rpm")
+    @patch("whatbroke.checks.security.shutil.which")
+    @patch("whatbroke.checks.security._run")
+    def test_update_check_counts_rpm_updates_from_dnf(self, run_mock, which_mock, _detect_mock):
+        which_mock.side_effect = lambda tool: {
+            "apt": "/usr/bin/apt",
+            "dnf": "/usr/bin/dnf",
+        }.get(tool)
+        run_mock.return_value = MagicMock(
+            returncode=100,
+            stdout="pkg-a.x86_64 1.2 repo\npkg-b.noarch 3.4 repo\n",
+            stderr="",
+        )
+
+        updates = security._check_updates()
+
+        self.assertEqual(updates, {"count": 2, "has_security": False})
+        self.assertEqual(run_mock.call_args.args[0], ["dnf", "check-update"])
+
+
 if __name__ == "__main__":
     unittest.main()

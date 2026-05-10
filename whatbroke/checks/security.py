@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..result import Result, escalate
+from ._packaging import detect_package_kind as _detect_package_kind
 
 _FAILED_LOGIN_WARN = 20
 _FAILED_LOGIN_CRIT = 100
@@ -102,7 +103,9 @@ def _check_failed_logins() -> tuple:
 
 def _check_updates() -> dict:
     """Return dict: {'count': N, 'has_security': bool}."""
-    if shutil.which("apt"):
+    package_kind = _detect_package_kind()
+
+    if package_kind == "deb" and shutil.which("apt"):
         try:
             proc = _run(
                 ["bash", "-c", "apt list --upgradable 2>/dev/null | tail -n +2"],
@@ -117,7 +120,8 @@ def _check_updates() -> dict:
         except Exception:
             pass
 
-    for tool in ("dnf", "yum"):
+    rpm_tools = ("dnf", "yum") if package_kind in {"rpm", None} else ()
+    for tool in rpm_tools:
         if shutil.which(tool):
             try:
                 proc = _run([tool, "check-update"], timeout=30)
