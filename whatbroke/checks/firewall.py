@@ -208,6 +208,7 @@ def check() -> Result:
                 "  ufw:       sudo ufw status verbose\n"
                 "If no live firewall is confirmed, then enable one backend deliberately."
             )
+            details.extend(inactive)
         else:
             issues.insert(0, "No active firewall rules detected")
             remediation = (
@@ -216,7 +217,7 @@ def check() -> Result:
                 "  ufw:       ufw enable\n"
                 "  firewalld: systemctl enable --now firewalld"
             )
-        issues.extend(inactive)
+            issues.extend(inactive)
     else:
         details.extend(f"{line}  (inactive backend, another firewall appears active)" for line in inactive)
 
