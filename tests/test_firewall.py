@@ -98,6 +98,19 @@ class FirewallTests(unittest.TestCase):
         self.assertIn("firewalld: installed but not running", result.details)
         self.assertNotIn("installed but not running", result.message)
 
+    @patch("whatbroke.checks.firewall._probe_nftables", return_value=(False, None, ""))
+    @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(None, "firewalld: service active (run with sudo to confirm daemon state)"))
+    @patch("whatbroke.checks.firewall._probe_iptables", return_value=(False, 0, ""))
+    @patch("whatbroke.checks.firewall._probe_ufw", return_value=(None, ""))
+    def test_check_suggests_only_firewalld_follow_up_when_firewalld_state_is_unconfirmed(self, *_mocks):
+        result = firewall.check()
+
+        self.assertEqual(result.status, "WARN")
+        self.assertEqual(result.message, "Firewall present but live status could not be confirmed without privilege")
+        self.assertIn("sudo firewall-cmd --state", result.remediation)
+        self.assertNotIn("sudo nft list ruleset", result.remediation)
+        self.assertNotIn("sudo ufw status verbose", result.remediation)
+
     @patch("whatbroke.checks.firewall._run", return_value=(1, "", "Operation not permitted"))
     @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/sbin/nft")
     def test_probe_nftables_returns_unconfirmed_when_ruleset_requires_root(self, *_mocks):

@@ -140,6 +140,7 @@ def check() -> Result:
     found_any = False
     firewall_active = False
     firewall_unconfirmed = False
+    unconfirmed_commands: list[str] = []
 
     # nftables
     nft_active, nft_rules, nft_detail = _probe_nftables()
@@ -149,6 +150,7 @@ def check() -> Result:
             firewall_active = True
         elif nft_active is None:
             firewall_unconfirmed = True
+            unconfirmed_commands.append("  nftables:  sudo nft list ruleset")
         details.append(nft_detail)
 
     # ufw
@@ -159,6 +161,7 @@ def check() -> Result:
             firewall_active = True
         elif ufw_active is None:
             firewall_unconfirmed = True
+            unconfirmed_commands.append("  ufw:       sudo ufw status verbose")
         if ufw_active is False:  # explicitly inactive (not just unknown)
             inactive.append(ufw_detail)
         else:
@@ -170,6 +173,9 @@ def check() -> Result:
         found_any = True
         if fwd_active is True:
             firewall_active = True
+        elif fwd_active is None:
+            firewall_unconfirmed = True
+            unconfirmed_commands.append("  firewalld: sudo firewall-cmd --state")
         if fwd_active is False:
             inactive.append(fwd_detail)
         else:
@@ -185,6 +191,7 @@ def check() -> Result:
                 details.append(ipt_detail)
             elif ipt_active is None:
                 firewall_unconfirmed = True
+                unconfirmed_commands.append("  iptables:  sudo iptables -L -n --line-numbers")
                 details.append(ipt_detail)
             else:
                 details.append(f"{ipt_detail}  (default ACCEPT, no rules)")
@@ -202,10 +209,10 @@ def check() -> Result:
         status = escalate(status, "WARN")
         if firewall_unconfirmed:
             issues.insert(0, "Firewall present but live status could not be confirmed without privilege")
+            commands = "\n".join(dict.fromkeys(unconfirmed_commands)) or "  sudo nft list ruleset"
             remediation = (
                 "Re-run with sudo before changing firewall state:\n"
-                "  nftables:  sudo nft list ruleset\n"
-                "  ufw:       sudo ufw status verbose\n"
+                f"{commands}\n"
                 "If no live firewall is confirmed, then enable one backend deliberately."
             )
             details.extend(inactive)
