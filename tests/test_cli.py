@@ -120,6 +120,46 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertNotIn("hardware", output)
         self.assertNotIn("security", output)
 
+    def test_diff_returns_zero_when_existing_broken_checks_are_unchanged(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "services": {"status": "BROKE", "message": "1 failed unit(s)", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "services": lambda: Result("services", "BROKE", "1 failed unit(s)"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(diff=True))
+            output = buf.getvalue()
+
+        self.assertEqual(code, 0)
+        self.assertIn("No broken checks changed since last run.", output)
+
+    def test_compact_diff_returns_zero_when_existing_broken_checks_are_unchanged(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "services": {"status": "BROKE", "message": "1 failed unit(s)", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "services": lambda: Result("services", "BROKE", "1 failed unit(s)"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(compact=True, diff=True))
+            output = buf.getvalue()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "")
+
     def test_summary_includes_recovered_counts(self):
         previous_state = {
             "updated_at": "2026-04-11T00:00:00+00:00",
@@ -260,9 +300,27 @@ class CliStateAndHintsTests(unittest.TestCase):
 
         self.assertEqual(code, 3)
         self.assertEqual([item["name"] for item in payload], ["firewall", "services", "users"])
-        self.assertEqual(payload[0]["change"], "worse")
-        self.assertEqual(payload[1]["change"], "changed")
-        self.assertEqual(payload[2]["change"], "new")
+        self.assertEqual([item["change"] for item in payload], ["worse", "changed", "new"])
+
+    def test_json_diff_returns_zero_with_empty_delta_payload(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "services": {"status": "BROKE", "message": "1 failed unit(s)", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "services": lambda: Result("services", "BROKE", "1 failed unit(s)"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(json=True, diff=True))
+            payload = json.loads(buf.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, [])
 
 
 class CliModuleExecutionTests(unittest.TestCase):

@@ -192,7 +192,7 @@ The overall worst status is used as the **exit code** (0=OK, 1=WARN, 2=BROKE, 3=
 */15 * * * * root whatbroke --compact --diff | mail -s "whatbroke: new issues on $(hostname)" root@localhost
 ```
 
-Because `--diff` outputs nothing when there are no changed broken checks, this only sends mail when a problem appears or materially changes.
+Because `--diff` outputs nothing and exits 0 when there are no changed broken checks, this only sends mail when a problem appears or materially changes.
 
 ### Monitoring system integration
 ```bash

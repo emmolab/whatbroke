@@ -421,6 +421,8 @@ def _format_change_summary(changes: dict) -> str:
 
 def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
     """Run one pass of all checks. Returns exit code."""
+    diff_exit = 0 if args.diff else None
+
     # In watch mode clear the screen before printing
     if watch_interval is not None:
         print(Colors.CLEAR, end="")
@@ -478,7 +480,8 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
         if not display:
             if not args.diff:
                 print(f"{Colors.GREEN}OK{Colors.END}")
-            return SEVERITY[worst]
+                return SEVERITY[worst]
+            return diff_exit
         for r in display:
             c = _color(r.status)
             tag = _transition_tag(r.name, changes)
@@ -505,6 +508,8 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
             }
             for r in display
         ], indent=2))
+        if args.diff and not display:
+            return diff_exit
         return SEVERITY[worst]
 
     # ── pretty output ─────────────────────────────────────────────────────────
@@ -526,7 +531,7 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
             c = _color(worst)
             print(f"{Colors.GREEN}No broken checks changed since last run.{Colors.END}  "
                   f"(overall: {c}{worst}{Colors.END})\n")
-            return SEVERITY[worst]
+            return diff_exit
 
     # --broken-only: hide OK checks
     if args.broken_only:
