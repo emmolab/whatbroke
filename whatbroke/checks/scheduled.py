@@ -398,7 +398,16 @@ def check() -> Result:
 
     # Message
     if status == "OK":
-        parts = ["Cron running"]
+        if cron_running:
+            cron_summary = "Cron running"
+        elif cron_workload:
+            cron_summary = "Cron configured"
+        elif cron_installed:
+            cron_summary = "Cron installed but idle"
+        else:
+            cron_summary = "Cron not installed"
+
+        parts = [cron_summary]
         if cron_users:
             parts.append(f"{len(cron_users)} user crontab(s)")
         if timer_count:

@@ -120,6 +120,8 @@ class ScheduledCheckTests(unittest.TestCase):
 
         self.assertEqual(result.status, "OK")
         self.assertIn("4 systemd timer(s)", result.message)
+        self.assertIn("Cron not installed", result.message)
+        self.assertNotIn("Cron running", result.message)
         self.assertIn("Cron service: not installed", result.details)
 
     @patch("whatbroke.checks.scheduled._check_systemd_timers", return_value=[])
@@ -147,6 +149,8 @@ class ScheduledCheckTests(unittest.TestCase):
         result = scheduled.check()
 
         self.assertEqual(result.status, "OK")
+        self.assertIn("Cron installed but idle", result.message)
+        self.assertNotIn("Cron running", result.message)
         self.assertIn("Cron service: not running (no cron jobs detected)", result.details)
         self.assertIn("2 systemd timer(s)", result.message)
 
