@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from whatbroke.cli import _load_state, _parse_check_filter, _result_hint, _run_single, _stdout_supports_color, main
+from whatbroke.cli import _load_state, _parse_check_filter, _result_hint, _run_single, _stdout_supports_color, _visible_details, main
 from whatbroke.result import Result
 
 
@@ -89,6 +89,27 @@ class CliStateAndHintsTests(unittest.TestCase):
         ))
 
         self.assertEqual(hint, "Next: Enable a firewall: systemctl enable --now nftables")
+
+    def test_visible_details_skips_message_duplicates_and_repeated_details(self):
+        result = Result(
+            name="firewall",
+            status="WARN",
+            message="Firewall status unclear",
+            details=[
+                "Firewall status unclear",
+                "nftables: installed (ruleset requires root to inspect)",
+                "nftables: installed (ruleset requires root to inspect)",
+                "ufw: installed (run with sudo to inspect status)",
+            ],
+        )
+
+        self.assertEqual(
+            _visible_details(result),
+            [
+                "nftables: installed (ruleset requires root to inspect)",
+                "ufw: installed (run with sudo to inspect status)",
+            ],
+        )
 
     def test_diff_reports_worsened_and_changed_broken_checks(self):
         previous_state = {

@@ -283,6 +283,22 @@ def _format_nagios(results: list[Result], worst: str, elapsed: float) -> str:
     return f"WHATBROKE {_nagios_label(worst)} - {summary} | {perfdata}"
 
 
+def _visible_details(r: Result) -> list[str]:
+    seen: set[str] = set()
+    details: list[str] = []
+    message = r.message.strip()
+
+    for detail in r.details:
+        normalized = detail.strip()
+        if not normalized or normalized == message or normalized in seen:
+            continue
+        seen.add(normalized)
+        details.append(detail)
+
+    return details
+
+
+
 def _print_result(r: Result, verbose: bool, changes: dict | None = None) -> None:
     c = _color(r.status)
     tag = _transition_tag(r.name, changes or {"new": set(), "worsened": set(), "improved": set(), "resolved": set(), "changed": set()})
@@ -296,7 +312,7 @@ def _print_result(r: Result, verbose: bool, changes: dict | None = None) -> None
         previous = (changes or {}).get("previous", {}).get(r.name)
         if previous:
             print(f"  {Colors.DIM}was {previous.get('status', 'OK')}: {previous.get('message', '')}{Colors.END}")
-        for d in r.details:
+        for d in _visible_details(r):
             print(f"  {Colors.CYAN}•{Colors.END} {d}")
         if r.remediation:
             print(f"  {Colors.YELLOW}→ Fix:{Colors.END} {r.remediation}")
