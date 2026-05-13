@@ -76,6 +76,7 @@ class FirewallTests(unittest.TestCase):
 
     @patch("whatbroke.checks.firewall._probe_nftables", return_value=(None, None, "nftables: installed (ruleset requires root to inspect)"))
     @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(None, ""))
+    @patch("whatbroke.checks.firewall._probe_iptables", return_value=(False, 0, "iptables: 0 non-default rule(s)"))
     @patch("whatbroke.checks.firewall._probe_ufw", return_value=(None, ""))
     def test_check_reports_unconfirmed_firewall_context_when_nftables_needs_privilege(self, *_mocks):
         result = firewall.check()
@@ -83,12 +84,14 @@ class FirewallTests(unittest.TestCase):
         self.assertEqual(result.status, "WARN")
         self.assertEqual(result.message, "Firewall present but live status could not be confirmed without privilege")
         self.assertIn("nftables: installed (ruleset requires root to inspect)", result.details)
+        self.assertIn("iptables: 0 non-default rule(s)  (default ACCEPT, no rules)", result.details)
         self.assertNotIn("No active firewall rules detected", result.details)
         self.assertIn("Re-run with sudo before changing firewall state", result.remediation)
         self.assertIn("sudo nft list ruleset", result.remediation)
 
     @patch("whatbroke.checks.firewall._probe_nftables", return_value=(None, None, "nftables: installed (ruleset requires root to inspect)"))
     @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(False, "firewalld: installed but not running"))
+    @patch("whatbroke.checks.firewall._probe_iptables", return_value=(False, 0, ""))
     @patch("whatbroke.checks.firewall._probe_ufw", return_value=(None, ""))
     def test_check_keeps_inactive_backends_out_of_summary_when_firewall_state_is_unconfirmed(self, *_mocks):
         result = firewall.check()
@@ -110,6 +113,30 @@ class FirewallTests(unittest.TestCase):
         self.assertIn("sudo firewall-cmd --state", result.remediation)
         self.assertNotIn("sudo nft list ruleset", result.remediation)
         self.assertNotIn("sudo ufw status verbose", result.remediation)
+
+    @patch("whatbroke.checks.firewall._probe_nftables", return_value=(None, None, "nftables: installed (ruleset requires root to inspect)"))
+    @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(None, ""))
+    @patch("whatbroke.checks.firewall._probe_iptables", return_value=(True, 7, "iptables: 7 non-default rule(s)"))
+    @patch("whatbroke.checks.firewall._probe_ufw", return_value=(None, ""))
+    def test_check_reports_ok_when_iptables_is_active_even_if_nftables_needs_privilege(self, *_mocks):
+        result = firewall.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertEqual(result.message, "Firewall active")
+        self.assertIn("nftables: installed (ruleset requires root to inspect)", result.details)
+        self.assertIn("iptables: 7 non-default rule(s)", result.details)
+
+    @patch("whatbroke.checks.firewall._probe_nftables", return_value=(False, 0, "nftables: 0 rule(s)"))
+    @patch("whatbroke.checks.firewall._probe_firewalld", return_value=(None, ""))
+    @patch("whatbroke.checks.firewall._probe_iptables", return_value=(True, 4, "iptables: 4 non-default rule(s)"))
+    @patch("whatbroke.checks.firewall._probe_ufw", return_value=(None, ""))
+    def test_check_reports_ok_when_iptables_is_active_even_if_nftables_is_installed_but_inactive(self, *_mocks):
+        result = firewall.check()
+
+        self.assertEqual(result.status, "OK")
+        self.assertEqual(result.message, "Firewall active")
+        self.assertIn("nftables: 0 rule(s)", result.details)
+        self.assertIn("iptables: 4 non-default rule(s)", result.details)
 
     @patch("whatbroke.checks.firewall._run", return_value=(1, "", "Operation not permitted"))
     @patch("whatbroke.checks.firewall.shutil.which", return_value="/usr/sbin/nft")

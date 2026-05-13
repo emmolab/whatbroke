@@ -181,8 +181,10 @@ def check() -> Result:
         else:
             details.append(fwd_detail)
 
-    # iptables (skip if nftables present — nft supersedes iptables on modern systems)
-    if not nft_detail:
+    # iptables remains worth checking when nftables is absent, inactive, or
+    # merely unconfirmed. Skip it only once nftables is clearly active so we do
+    # not hide legacy iptables rules on mixed-tool hosts.
+    if nft_active is not True:
         ipt_active, ipt_rules, ipt_detail = _probe_iptables()
         if ipt_detail:
             found_any = True
