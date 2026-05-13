@@ -299,12 +299,22 @@ def _visible_details(r: Result) -> list[str]:
 
 
 
+def _hint_to_show(r: Result, verbose: bool) -> str | None:
+    hint = _result_hint(r)
+    if not hint:
+        return None
+    if verbose and r.remediation and not r.hint:
+        return None
+    return hint
+
+
+
 def _print_result(r: Result, verbose: bool, changes: dict | None = None) -> None:
     c = _color(r.status)
     tag = _transition_tag(r.name, changes or {"new": set(), "worsened": set(), "improved": set(), "resolved": set(), "changed": set()})
     print(f"{Colors.BOLD}{r.name}{Colors.END}: {c}{r.status}{Colors.END}  {r.message}{tag}")
 
-    hint = _result_hint(r)
+    hint = _hint_to_show(r, verbose)
     if hint:
         print(f"  {Colors.DIM}↳ {hint}{Colors.END}")
 

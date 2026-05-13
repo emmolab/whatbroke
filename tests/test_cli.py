@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from whatbroke.cli import _load_state, _parse_check_filter, _result_hint, _run_single, _stdout_supports_color, _visible_details, main
+from whatbroke.cli import _hint_to_show, _load_state, _parse_check_filter, _result_hint, _run_single, _stdout_supports_color, _visible_details, main
 from whatbroke.result import Result
 
 
@@ -109,6 +109,39 @@ class CliStateAndHintsTests(unittest.TestCase):
                 "nftables: installed (ruleset requires root to inspect)",
                 "ufw: installed (run with sudo to inspect status)",
             ],
+        )
+
+    def test_hint_to_show_suppresses_derived_hint_in_verbose_mode_when_fix_block_will_repeat_it(self):
+        result = Result(
+            name="firewall",
+            status="WARN",
+            message="Firewall status unclear",
+            remediation=(
+                "Re-run with sudo before changing firewall state:\n"
+                "  nftables:  sudo nft list ruleset\n"
+                "  ufw:       sudo ufw status verbose\n"
+                "If no live firewall is confirmed, then enable one backend deliberately."
+            ),
+        )
+
+        self.assertIsNone(_hint_to_show(result, verbose=True))
+        self.assertEqual(
+            _hint_to_show(result, verbose=False),
+            "Next: Re-run with sudo before changing firewall state: sudo nft list ruleset",
+        )
+
+    def test_hint_to_show_keeps_explicit_hint_in_verbose_mode(self):
+        result = Result(
+            name="services",
+            status="WARN",
+            message="Package manager lock present",
+            remediation="Wait for the active package transaction to finish.",
+            hint="Next: verify whether a package update is already running.",
+        )
+
+        self.assertEqual(
+            _hint_to_show(result, verbose=True),
+            "Next: verify whether a package update is already running.",
         )
 
     def test_diff_reports_worsened_and_changed_broken_checks(self):
