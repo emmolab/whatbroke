@@ -15,6 +15,13 @@ _SUPPRESSED_PATTERNS = (
 _DEFERRED_CRITICAL_PATTERNS = (
     re.compile(r"deprecated hardware is detected", re.IGNORECASE),
 )
+_OOM_PATTERNS = (
+    re.compile(r"\bout of memory\b", re.IGNORECASE),
+    re.compile(r"\boom-killer\b", re.IGNORECASE),
+    re.compile(r"\binvoked oom-killer\b", re.IGNORECASE),
+    re.compile(r"\bmemory cgroup out of memory\b", re.IGNORECASE),
+    re.compile(r"\bkilled process\s+\d+", re.IGNORECASE),
+)
 
 
 def _run(cmd, timeout=15):
@@ -99,6 +106,10 @@ def _check_kernel_messages() -> list:
     return issues
 
 
+def _looks_like_oom_event(line: str) -> bool:
+    return any(pattern.search(line) for pattern in _OOM_PATTERNS)
+
+
 def _check_oom_events() -> list:
     """Return lines describing OOM killer events in the last 24 h."""
     events = []
@@ -116,7 +127,7 @@ def _check_oom_events() -> list:
         proc = _run(["dmesg"], timeout=10)
         if proc.returncode == 0:
             for line in proc.stdout.splitlines():
-                if "out of memory" in line.lower() or "oom" in line.lower():
+                if _looks_like_oom_event(line):
                     events.append(line.strip())
     except Exception:
         pass

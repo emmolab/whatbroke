@@ -5,6 +5,32 @@ from whatbroke.checks import logs
 
 
 class LogsThresholdTests(unittest.TestCase):
+    def test_oom_fallback_matcher_is_specific(self):
+        self.assertTrue(logs._looks_like_oom_event("kernel: Out of memory: Killed process 1234 (python)"))
+        self.assertTrue(logs._looks_like_oom_event("kernel: invoked oom-killer: gfp_mask=0x1100ca"))
+        self.assertTrue(logs._looks_like_oom_event("kernel: Memory cgroup out of memory: Killed process 4321 (java)"))
+        self.assertFalse(logs._looks_like_oom_event("systemd: classroom.service finished successfully"))
+        self.assertFalse(logs._looks_like_oom_event("kernel: bloom filter resized for conntrack"))
+
+    @patch("whatbroke.checks.logs._run")
+    def test_oom_fallback_dmesg_ignores_non_oom_lines(self, mock_run):
+        mock_run.side_effect = [
+            type("Proc", (), {"returncode": 1, "stdout": "", "stderr": ""})(),
+            type("Proc", (), {
+                "returncode": 0,
+                "stdout": (
+                    "kernel: bloom filter resized for conntrack\n"
+                    "kernel: invoked oom-killer: gfp_mask=0x1100ca\n"
+                    "kernel: classroom.service finished successfully\n"
+                ),
+                "stderr": "",
+            })(),
+        ]
+
+        events = logs._check_oom_events()
+
+        self.assertEqual(events, ["kernel: invoked oom-killer: gfp_mask=0x1100ca"])
+
     @patch(
         "whatbroke.checks.logs._check_journal_critical",
         return_value=([
