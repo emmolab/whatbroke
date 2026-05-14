@@ -214,6 +214,75 @@ class CliStateAndHintsTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(output, "")
 
+    def test_diff_exit_code_tracks_changed_broken_checks_not_unchanged_overall_worst(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "disk": {"status": "CRIT", "message": "Disk full", "first_seen": None, "last_seen": None},
+                "logs": {"status": "OK", "message": "Healthy", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "disk": lambda: Result("disk", "CRIT", "Disk full"),
+            "logs": lambda: Result("logs", "WARN", "Recent errors"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(diff=True))
+            output = buf.getvalue()
+
+        self.assertEqual(code, 1)
+        self.assertIn("logs", output)
+        self.assertNotIn("disk: ", output)
+
+    def test_json_diff_exit_code_tracks_changed_broken_checks(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "disk": {"status": "CRIT", "message": "Disk full", "first_seen": None, "last_seen": None},
+                "logs": {"status": "OK", "message": "Healthy", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "disk": lambda: Result("disk", "CRIT", "Disk full"),
+            "logs": lambda: Result("logs", "WARN", "Recent errors"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(json=True, diff=True))
+            payload = json.loads(buf.getvalue())
+
+        self.assertEqual(code, 1)
+        self.assertEqual([item["name"] for item in payload], ["logs"])
+
+    def test_compact_diff_exit_code_tracks_changed_broken_checks(self):
+        previous_state = {
+            "updated_at": "2026-04-11T00:00:00+00:00",
+            "checks": {
+                "disk": {"status": "CRIT", "message": "Disk full", "first_seen": None, "last_seen": None},
+                "logs": {"status": "OK", "message": "Healthy", "first_seen": None, "last_seen": None},
+            },
+        }
+        results = {
+            "disk": lambda: Result("disk", "CRIT", "Disk full"),
+            "logs": lambda: Result("logs", "WARN", "Recent errors"),
+        }
+
+        with tempfile.TemporaryDirectory() as td, patch("whatbroke.cli._STATE_DIR", td), patch("whatbroke.cli._STATE_FILE", os.path.join(td, "state.json")), patch("whatbroke.cli._load_state", return_value=previous_state):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = _run_single(results, self._args(compact=True, diff=True))
+            output = buf.getvalue()
+
+        self.assertEqual(code, 1)
+        self.assertIn("logs:", output)
+        self.assertIn("Recent errors", output)
+        self.assertNotIn("Disk full", output)
+
     def test_summary_includes_recovered_counts(self):
         previous_state = {
             "updated_at": "2026-04-11T00:00:00+00:00",

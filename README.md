@@ -229,7 +229,7 @@ ExecStart=/usr/bin/whatbroke --compact
 `whatbroke` writes per-check state to `~/.local/share/whatbroke/state.json` after each run. This powers two features:
 
 - **Change badges** — checks can be tagged `[NEW]`, `[WORSE]`, `[CHANGED]`, `[IMPROVED]`, or `[RECOVERED]`
-- **`--diff` mode** — only shows broken checks that are new or changed since the previous run; prints `No broken checks changed since last run.` otherwise
+- **`--diff` mode** — only shows broken checks that are new or changed since the previous run; prints `No broken checks changed since last run.` otherwise, and exits based on the worst changed broken check rather than stale older failures
 
 The pretty view adds a short `Next:` hint for non-OK results so an on-call admin gets an immediate fix prompt without needing full verbose mode.
 

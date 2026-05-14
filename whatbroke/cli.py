@@ -258,6 +258,12 @@ def _nagios_label(status: str) -> str:
     return "CRITICAL"
 
 
+def _worst_status(results: list[Result], default: str = "OK") -> str:
+    if not results:
+        return default
+    return max(results, key=lambda r: SEVERITY[r.status]).status
+
+
 def _format_nagios(results: list[Result], worst: str, elapsed: float) -> str:
     """Return a single-line Nagios/Icinga-compatible plugin response."""
     counts = {status: sum(1 for r in results if r.status == status) for status in SEVERITY}
@@ -484,8 +490,7 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
         key=lambda r: (-SEVERITY[r.status], r.name),
     )
 
-    worst = max(results, key=lambda r: SEVERITY[r.status]).status \
-            if results else "OK"
+    worst = _worst_status(results)
 
     # ── State file ────────────────────────────────────────────────────────────
     changes = {"new": set(), "resolved": set(), "worsened": set(), "improved": set(), "changed": set(), "previous": {}}
@@ -512,7 +517,7 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
             c = _color(r.status)
             tag = _transition_tag(r.name, changes)
             print(f"{r.name}:{c}{r.status}{Colors.END} {r.message}{tag}")
-        return SEVERITY[worst]
+        return SEVERITY[_worst_status(display)] if args.diff else SEVERITY[worst]
 
     # ── JSON ──────────────────────────────────────────────────────────────────
     if args.json:
@@ -536,7 +541,7 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
         ], indent=2))
         if args.diff and not display:
             return diff_exit
-        return SEVERITY[worst]
+        return SEVERITY[_worst_status(display)] if args.diff else SEVERITY[worst]
 
     # ── pretty output ─────────────────────────────────────────────────────────
     if watch_interval is not None:
@@ -594,7 +599,7 @@ def _run_single(checks: dict, args, watch_interval: int | None = None) -> int:
         summary += change_summary
     print(summary)
 
-    return SEVERITY[worst]
+    return SEVERITY[_worst_status(display)] if args.diff else SEVERITY[worst]
 
 
 if __name__ == "__main__":
