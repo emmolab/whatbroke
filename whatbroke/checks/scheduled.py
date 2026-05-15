@@ -17,6 +17,9 @@ _CRON_MACROS = {
     "@hourly",
 }
 
+_ANACRON_PERIOD_RE = re.compile(r"^(?:\d+|@[A-Za-z][A-Za-z0-9_-]*)$")
+_ANACRON_DELAY_RE = re.compile(r"^\d+$")
+
 _CRON_BACKUP_SUFFIXES = (
     "~",
     ".bak",
@@ -246,22 +249,38 @@ def _system_cron_issue_from_line(path: str, line_no: int, line: str) -> str | No
 
 
 
+def _anacron_issue_from_line(path: str, line_no: int, line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or _looks_like_env_assignment(stripped):
+        return None
+
+    parts = stripped.split()
+    if len(parts) < 4:
+        return f"{path}:{line_no}: malformed anacrontab entry: '{stripped}'"
+
+    period, delay = parts[0], parts[1]
+    if not _ANACRON_PERIOD_RE.match(period) or not _ANACRON_DELAY_RE.match(delay):
+        return f"{path}:{line_no}: malformed anacrontab entry: '{stripped}'"
+    return None
+
+
+
 def _check_system_cron_syntax() -> list[str]:
     issues = []
-    cron_files = ["/etc/crontab"]
+    cron_files = [("/etc/crontab", _system_cron_issue_from_line), ("/etc/anacrontab", _anacron_issue_from_line)]
     cron_dir = "/etc/cron.d"
 
     if os.path.isdir(cron_dir):
         for name in sorted(os.listdir(cron_dir)):
             full = os.path.join(cron_dir, name)
             if _system_cron_entry_active(full):
-                cron_files.append(full)
+                cron_files.append((full, _system_cron_issue_from_line))
 
-    for path in cron_files:
+    for path, issue_from_line in cron_files:
         try:
             with open(path) as handle:
                 for line_no, line in enumerate(handle, start=1):
-                    issue = _system_cron_issue_from_line(path, line_no, line)
+                    issue = issue_from_line(path, line_no, line)
                     if issue:
                         issues.append(issue)
         except OSError:
@@ -375,7 +394,7 @@ def check() -> Result:
         details.append(f"Crontab issues: {len(combined_cron_issues)}")
         details.extend(combined_cron_issues[:10])
         status = escalate(status, "WARN")
-        remediation = remediation or "Review user crontabs and system cron files: crontab -l -u <user>, /etc/crontab, /etc/cron.d/*"
+        remediation = remediation or "Review user crontabs and system cron files: crontab -l -u <user>, /etc/crontab, /etc/anacrontab, /etc/cron.d/*"
     else:
         if cron_users:
             details.append(f"User crontabs: {', '.join(cron_users)}")

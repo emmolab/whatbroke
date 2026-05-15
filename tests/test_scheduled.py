@@ -37,6 +37,20 @@ class ScheduledCheckTests(unittest.TestCase):
         macro_issue = scheduled._system_cron_issue_from_line("/etc/cron.d/app", 8, "@daily root")
         self.assertIn("malformed system cron macro entry", macro_issue)
 
+    def test_anacron_parser_ignores_env_comments_and_valid_entries(self):
+        self.assertIsNone(scheduled._anacron_issue_from_line("/etc/anacrontab", 1, "# comment"))
+        self.assertIsNone(scheduled._anacron_issue_from_line("/etc/anacrontab", 2, "MAILTO=root"))
+        self.assertIsNone(scheduled._anacron_issue_from_line("/etc/anacrontab", 3, "RANDOM_DELAY = 5"))
+        self.assertIsNone(scheduled._anacron_issue_from_line("/etc/anacrontab", 4, "1 5 cron.daily nice run-parts /etc/cron.daily"))
+        self.assertIsNone(scheduled._anacron_issue_from_line("/etc/anacrontab", 5, "@monthly 10 cron.monthly run-parts /etc/cron.monthly"))
+
+    def test_anacron_parser_flags_malformed_entries(self):
+        issue = scheduled._anacron_issue_from_line("/etc/anacrontab", 6, "1 cron.daily run-parts /etc/cron.daily")
+        self.assertIn("malformed anacrontab entry", issue)
+
+        invalid_period = scheduled._anacron_issue_from_line("/etc/anacrontab", 7, "daily 5 cron.daily run-parts /etc/cron.daily")
+        self.assertIn("malformed anacrontab entry", invalid_period)
+
     @patch("whatbroke.checks.scheduled.os.path.isfile", return_value=True)
     @patch("whatbroke.checks.scheduled.os.path.isdir", return_value=True)
     @patch("whatbroke.checks.scheduled.os.listdir", return_value=["app"])
@@ -44,7 +58,7 @@ class ScheduledCheckTests(unittest.TestCase):
         cron_d_body = "MAILTO=root\n0 0 * * * /usr/local/bin/app\n"
 
         def fake_open(path, *args, **kwargs):
-            if path == "/etc/crontab":
+            if path in {"/etc/crontab", "/etc/anacrontab"}:
                 raise FileNotFoundError(path)
             if path == "/etc/cron.d/app":
                 return io.StringIO(cron_d_body)
@@ -55,6 +69,24 @@ class ScheduledCheckTests(unittest.TestCase):
 
         self.assertEqual(len(issues), 1)
         self.assertIn("/etc/cron.d/app:2", issues[0])
+
+    @patch("whatbroke.checks.scheduled.os.path.isfile", return_value=True)
+    @patch("whatbroke.checks.scheduled.os.path.isdir", return_value=False)
+    def test_check_system_cron_syntax_detects_bad_anacrontab_entry(self, *_mocks):
+        anacron_body = "START_HOURS_RANGE=3-22\n1 cron.daily run-parts /etc/cron.daily\n"
+
+        def fake_open(path, *args, **kwargs):
+            if path == "/etc/crontab":
+                raise FileNotFoundError(path)
+            if path == "/etc/anacrontab":
+                return io.StringIO(anacron_body)
+            raise FileNotFoundError(path)
+
+        with patch("builtins.open", side_effect=fake_open):
+            issues = scheduled._check_system_cron_syntax()
+
+        self.assertEqual(len(issues), 1)
+        self.assertIn("/etc/anacrontab:2", issues[0])
 
     def test_system_cron_entry_filter_ignores_backup_and_disabled_names(self):
         self.assertTrue(scheduled._cron_entry_disabled_name("app.disabled"))
