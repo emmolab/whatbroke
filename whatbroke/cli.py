@@ -67,6 +67,11 @@ def _parse_check_filter(raw: str, known_checks: set[str], flag: str) -> set[str]
         )
     return selected
 
+
+def _check_description(check) -> str:
+    raw = inspect.getdoc(check) or "No description available."
+    return " ".join(raw.split())
+
 # ── State file (tracks first-seen timestamps for issues) ─────────────────────
 
 _STATE_DIR  = os.path.expanduser("~/.local/share/whatbroke")
@@ -409,15 +414,14 @@ def main() -> None:
             print(json.dumps([
                 {
                     "name": name,
-                    "description": inspect.getdoc(checks[name]) or "No description available.",
+                    "description": _check_description(checks[name]),
                 }
                 for name in ordered
             ], indent=2))
         else:
             for name in ordered:
                 if args.verbose:
-                    desc = inspect.getdoc(checks[name]) or "No description available."
-                    print(f"{name}: {desc}")
+                    print(f"{name}: {_check_description(checks[name])}")
                 else:
                     print(name)
         raise SystemExit(0)

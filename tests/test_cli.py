@@ -513,6 +513,32 @@ class CliFilterParsingTests(unittest.TestCase):
             ],
         )
 
+    def test_main_list_checks_normalizes_multiline_descriptions(self):
+        def security_check():
+            """Failed logins, pending updates, SSH config, certificates,
+            SELinux/AppArmor, entropy pool."""
+            return Result("security", "OK", "healthy")
+
+        expected = "Failed logins, pending updates, SSH config, certificates, SELinux/AppArmor, entropy pool."
+
+        with patch("whatbroke.cli.discover_checks", return_value={"security": security_check}), \
+             patch("sys.argv", ["whatbroke", "--list-checks", "--verbose"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(buf.getvalue().splitlines(), [f"security: {expected}"])
+
+        with patch("whatbroke.cli.discover_checks", return_value={"security": security_check}), \
+             patch("sys.argv", ["whatbroke", "--list-checks", "--json"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit) as ctx:
+                main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(json.loads(buf.getvalue()), [{"name": "security", "description": expected}])
+
     def test_main_lists_checks_after_only_filter(self):
         with patch("whatbroke.cli.discover_checks", return_value={
             "logs": lambda: Result("logs", "OK", "healthy"),
