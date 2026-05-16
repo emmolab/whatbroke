@@ -97,9 +97,14 @@ def _crontab_permission_denied(proc) -> bool:
     return any(marker in combined for marker in markers)
 
 
+def _line_has_cron_workload(line: str) -> bool:
+    stripped = line.strip()
+    return bool(stripped and not stripped.startswith("#") and not _looks_like_env_assignment(stripped))
+
+
 def _user_cron_issue_from_line(user: str, line: str) -> str | None:
     stripped = line.strip()
-    if not stripped or stripped.startswith("#") or _looks_like_env_assignment(stripped):
+    if not _line_has_cron_workload(stripped):
         return None
 
     parts = stripped.split()
@@ -210,7 +215,7 @@ def _system_cron_entries() -> list[str]:
     for path in cron_paths:
         try:
             with open(path) as f:
-                if any(line.strip() and not line.lstrip().startswith("#") for line in f):
+                if any(_line_has_cron_workload(line) for line in f):
                     entries.append(path)
         except OSError:
             pass
@@ -231,7 +236,7 @@ def _system_cron_entries() -> list[str]:
 
 def _system_cron_issue_from_line(path: str, line_no: int, line: str) -> str | None:
     stripped = line.strip()
-    if not stripped or stripped.startswith("#") or _looks_like_env_assignment(stripped):
+    if not _line_has_cron_workload(stripped):
         return None
 
     parts = stripped.split()
@@ -251,7 +256,7 @@ def _system_cron_issue_from_line(path: str, line_no: int, line: str) -> str | No
 
 def _anacron_issue_from_line(path: str, line_no: int, line: str) -> str | None:
     stripped = line.strip()
-    if not stripped or stripped.startswith("#") or _looks_like_env_assignment(stripped):
+    if not _line_has_cron_workload(stripped):
         return None
 
     parts = stripped.split()
@@ -348,10 +353,7 @@ def _list_crontab_users() -> list:
                             continue
                         proc = _run(cmd, timeout=5)
                         if "no crontab for" not in proc.stderr.lower() and proc.returncode == 0:
-                            if any(
-                                l.strip() and not l.strip().startswith("#")
-                                for l in proc.stdout.splitlines()
-                            ):
+                            if any(_line_has_cron_workload(line) for line in proc.stdout.splitlines()):
                                 users_with_crons.append(user)
                     except Exception:
                         pass

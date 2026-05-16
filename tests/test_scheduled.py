@@ -44,6 +44,13 @@ class ScheduledCheckTests(unittest.TestCase):
         self.assertIsNone(scheduled._anacron_issue_from_line("/etc/anacrontab", 4, "1 5 cron.daily nice run-parts /etc/cron.daily"))
         self.assertIsNone(scheduled._anacron_issue_from_line("/etc/anacrontab", 5, "@monthly 10 cron.monthly run-parts /etc/cron.monthly"))
 
+    def test_line_has_cron_workload_ignores_env_only_entries(self):
+        self.assertFalse(scheduled._line_has_cron_workload("# comment"))
+        self.assertFalse(scheduled._line_has_cron_workload("MAILTO=root"))
+        self.assertFalse(scheduled._line_has_cron_workload("PATH = /usr/local/bin:/usr/bin"))
+        self.assertTrue(scheduled._line_has_cron_workload("@daily /usr/local/bin/backup"))
+        self.assertTrue(scheduled._line_has_cron_workload("*/5 * * * * /usr/local/bin/check"))
+
     def test_anacron_parser_flags_malformed_entries(self):
         issue = scheduled._anacron_issue_from_line("/etc/anacrontab", 6, "1 cron.daily run-parts /etc/cron.daily")
         self.assertIn("malformed anacrontab entry", issue)
@@ -139,6 +146,38 @@ class ScheduledCheckTests(unittest.TestCase):
 
         self.assertIn("/etc/cron.hourly/real-job", entries)
         self.assertNotIn("/etc/cron.hourly/README", entries)
+
+    @patch("whatbroke.checks.scheduled._run")
+    def test_list_crontab_users_ignores_env_only_crontabs(self, mock_run):
+        passwd_data = "alice:x:1000:1000::/home/alice:/bin/bash\n"
+
+        def fake_run(cmd, timeout=5):
+            if cmd[:3] == ["crontab", "-l", "-u"]:
+                return type("Proc", (), {"returncode": 0, "stdout": "MAILTO=root\nPATH=/usr/local/bin:/usr/bin\n", "stderr": ""})()
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        mock_run.side_effect = fake_run
+
+        with patch("builtins.open", return_value=io.StringIO(passwd_data)):
+            users = scheduled._list_crontab_users()
+
+        self.assertEqual(users, [])
+
+    @patch("whatbroke.checks.scheduled.os.listdir", return_value=[])
+    @patch("whatbroke.checks.scheduled.os.path.isfile", return_value=True)
+    @patch("whatbroke.checks.scheduled.os.path.isdir", return_value=False)
+    def test_system_cron_entries_ignore_env_only_crontab_files(self, *_mocks):
+        cron_body = "SHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin\n"
+
+        def fake_open(path, *args, **kwargs):
+            if path == "/etc/crontab":
+                return io.StringIO(cron_body)
+            raise FileNotFoundError(path)
+
+        with patch("builtins.open", side_effect=fake_open):
+            entries = scheduled._system_cron_entries()
+
+        self.assertEqual(entries, [])
 
     @patch("whatbroke.checks.scheduled._check_systemd_timers", return_value=[])
     @patch("whatbroke.checks.scheduled._list_active_timers", return_value=4)
