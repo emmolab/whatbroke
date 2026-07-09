@@ -185,6 +185,8 @@ The overall worst status is used as the **exit code** (0=OK, 1=WARN, 2=BROKE, 3=
 
 ## Automation
 
+See [ROADMAP.md](ROADMAP.md) for planned improvements around a lightweight web GUI, daemon mode, historical timelines, and alerting sinks.
+
 ### Cron — alert only on new issues
 ```bash
 # /etc/cron.d/whatbroke
